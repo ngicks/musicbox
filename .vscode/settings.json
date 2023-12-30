@@ -1,0 +1,17 @@
+{
+    "cSpell.words": [
+        "afero",
+        "composeloader",
+        "dire",
+        "dirents",
+        "fsutil"
+    ],
+    "go.lintTool": "golangci-lint",
+    "go.inlayHints.assignVariableTypes": true,
+    "go.inlayHints.compositeLiteralFields": true,
+    "go.inlayHints.compositeLiteralTypes": true,
+    "go.inlayHints.constantValues": true,
+    "go.inlayHints.functionTypeParameters": true,
+    "go.inlayHints.parameterNames": true,
+    "go.inlayHints.rangeVariableTypes": true
+}
