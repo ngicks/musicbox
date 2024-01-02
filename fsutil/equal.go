@@ -14,6 +14,8 @@ var fakeErr = errors.New("fake")
 // The comparison evaluates mode bits, content of regular files. It ignores mod time.
 // Equal returns immediately an error if l has other than directories or regular files.
 //
+// Note that mode bits of the root directory is ignored since often it is not controlled.
+//
 // Performance:
 //   - Equal takes stat of every file in l and r.
 //   - Also all dirents of directories are read.
@@ -29,30 +31,35 @@ func Equal(l, r fs.FS) (bool, error) {
 			return fmt.Errorf("fsutil.Equal: only directories and regular files are supported")
 		}
 
-		lf, err := l.Open(path)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = lf.Close() }()
+		var lf, rf fs.File
+		// no mode bits comparison for root dir.
+		if path != "." {
+			// comparing mode bits.
+			lf, err = l.Open(path)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = lf.Close() }()
 
-		ls, err := lf.Stat()
-		if err != nil {
-			return err
-		}
+			ls, err := lf.Stat()
+			if err != nil {
+				return err
+			}
 
-		rf, err := r.Open(path)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rf.Close() }()
+			rf, err = r.Open(path)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rf.Close() }()
 
-		rs, err := rf.Stat()
-		if err != nil {
-			return err
-		}
+			rs, err := rf.Stat()
+			if err != nil {
+				return err
+			}
 
-		if ls.Mode() != rs.Mode() {
-			return fakeErr
+			if ls.Mode() != rs.Mode() {
+				return fakeErr
+			}
 		}
 
 		if d.IsDir() {
@@ -102,10 +109,15 @@ func sameFile(r, l fs.File) (bool, error) {
 		return false, err
 	}
 
-	rsize, lsize := rs.Size(), ls.Size()
+	rsize := rs.Size()
+	lsize := ls.Size()
 
 	if rsize != lsize {
 		return false, nil
+	}
+
+	if rsize == 0 {
+		return true, nil
 	}
 
 	size := int(rsize)

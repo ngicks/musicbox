@@ -17,9 +17,9 @@ import (
 // Caveats:
 // There's no safety for power failure.
 // In case safety is important for the caller,
-// dst should be under a temporal directory.
+// dst should be set to a temporarily created directory.
 // On completion, the caller should call rename(2), or equivalent syscalls for
-// caller's platform, to its final destination.
+// caller's platform, to its final destination, making the operation near atomic.
 // Note that this method does not allow dst to have existing files and merging them.
 func CopyFS(dst afero.Fs, src fs.FS) error {
 	var buf []byte
@@ -32,6 +32,30 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 		if d.IsDir() {
 			if err := dst.MkdirAll(targ, 0777); err != nil {
 				return err
+			}
+
+			ss, err := d.Info()
+			if err != nil {
+				return err
+			}
+			ds, err := dst.Stat(targ)
+			if err != nil {
+				return err
+			}
+
+			if ds.Mode().Perm() == ss.Mode().Perm() {
+				return nil
+			}
+
+			err = dst.Chmod(targ, ss.Mode().Perm())
+			if path == "." && os.IsNotExist(err) {
+				// Some implementation refuses to create root dir(".").
+				// In that case Chmod returns ErrNotExist.
+				// Just ignore it.
+				err = nil
+			}
+			if err != nil {
+				return fmt.Errorf("CopyFS: failed to chmod created dir, targ = %s, err = %w", targ, err)
 			}
 			return nil
 		}
@@ -51,7 +75,7 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 			return err
 		}
 
-		w, err := dst.OpenFile(targ, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666|info.Mode()&0777)
+		w, err := dst.OpenFile(targ, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode()&0777)
 		if err != nil {
 			return err
 		}

@@ -86,7 +86,7 @@ func TestEqual(t *testing.T) {
 		l, r fs.FS
 	}
 
-	//NOTE: we can not use embed.FS since it fakes mode bites.
+	//NOTE: we can not use embed.FS since it fakes mode bits.
 
 	for _, p := range []pair{
 		{

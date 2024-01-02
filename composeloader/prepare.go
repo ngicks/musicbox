@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 
 	"github.com/ngicks/musicbox/fsutil"
 	"github.com/spf13/afero"
@@ -15,68 +14,128 @@ import (
 
 var ErrInvalidInput = errors.New("invalid input")
 
-var aferoFsType = reflect.TypeOf((*afero.Fs)(nil)).Elem()
+var (
+	aferoFsType = reflect.TypeOf((*afero.Fs)(nil)).Elem()
+	fsFsType    = reflect.TypeOf((*fs.FS)(nil)).Elem()
+)
 
-// ProjectDirOption is an option for project dir extracted from Archive.
+// ProjectDir is an option for project dir extracted from Archive.
 // All paths must be slash separated even on Window.
-type ProjectDirOption struct {
+type ProjectDir struct {
 	// fs.FS which includes compose.yml and any other related files.
-	Archive fs.FS
+	archive fs.FS
 	// prefix path for copy destination of Archive.
-	Prefix string
+	prefix string
 	// path for compose.yml in Archive
-	ComposeYml string
+	composeYml string
 	// Target directory in which Load will dump some or all of contents stored in Archive.
-	// TempDir is allowed to be empty, in that case return value of os.MkdirTemp("", "some_pat_*") is used instead.
-	TempDir string
+	// tempDir is allowed to be empty, in that case return value of os.MkdirTemp("", "some_pat_*") is used instead.
+	tempDir string
+
+	cleanTempDirOnError bool
+}
+
+type ProjectDirOption func(d *ProjectDir)
+
+// WithPrefix sets prefix for archive extraction destination.
+// If the last WithPrefix option is applied with non empty prefix,
+// The fs is extracted from archive to filepath.Join(tempDir, prefix).
+func WithPrefix(prefix string) ProjectDirOption {
+	return func(d *ProjectDir) {
+		d.prefix = prefix
+	}
+}
+
+// WithTempDir change tempDir to an arbitrary location.
+// If tempDir is empty, d uses os.MkdirTemp().
+func WithTempDir(tempDir string) ProjectDirOption {
+	return func(d *ProjectDir) {
+		d.tempDir = tempDir
+	}
+}
+
+// WithCleanTempDirOnError sets if d erase all contents under the temp dir
+// at an occurrence of an error in Prepare.
+func WithCleanTempDirOnError(c bool) ProjectDirOption {
+	return func(d *ProjectDir) {
+		d.cleanTempDirOnError = c
+	}
+}
+
+// NewProjectDir returns a newly created ProjectDir.
+// archive must contain compose.yml at the path composeYml is pointing to.
+func NewProjectDir(archive fs.FS, composeYml string, opts ...ProjectDirOption) *ProjectDir {
+	d := &ProjectDir{
+		archive:    archive,
+		composeYml: composeYml,
+	}
+
+	for _, opt := range opts {
+		opt(d)
+	}
+
+	return d
 }
 
 // Err returns a non nil error if o is invalid, otherwise returns nil.
-func (o ProjectDirOption) Err() error {
-	if o.Archive == nil {
-		return fmt.Errorf("%w: Archive is nil", ErrInvalidInput)
+func (o ProjectDir) Err() error {
+	if o.archive == nil {
+		return fmt.Errorf("%w: archive is nil", ErrInvalidInput)
 	}
-	if o.ComposeYml == "" {
-		return fmt.Errorf("%w: ComposeYml is empty", ErrInvalidInput)
+
+	if isEmpty(o.composeYml) {
+		return fmt.Errorf("%w: composeYml is empty", ErrInvalidInput)
+	} else if !filepath.IsLocal(o.composeYml) {
+		return newNotLocalErr("composeYml", o.composeYml)
 	}
-	if o.Prefix != "" {
-		prefix := filepath.Clean(filepath.FromSlash(o.Prefix))
-		if filepath.IsAbs(prefix) || strings.Contains(prefix, "..") {
-			return fmt.Errorf("%w: Prefix specifies out of TempDir, prefix = %s", ErrInvalidInput, prefix)
-		}
+
+	if !isEmpty(o.prefix) && !filepath.IsLocal(o.prefix) {
+		return newNotLocalErr("prefix", o.prefix)
 	}
-	if o.TempDir != "" {
-		s, err := os.Stat(o.TempDir)
+
+	if !isEmpty(o.tempDir) {
+		s, err := os.Stat(o.tempDir)
 		if err != nil {
-			return fmt.Errorf("%w: taking stat of TempDir failed because of %w", ErrInvalidInput, err)
+			return fmt.Errorf("%w: taking stat of tempDir failed because of %w", ErrInvalidInput, err)
 		}
 		if !s.IsDir() {
-			return fmt.Errorf("%w: TempDir is not at dir, mode is %b", ErrInvalidInput, s.Mode())
+			return fmt.Errorf("%w: tempDir is not a dir, mode is %b", ErrInvalidInput, s.Mode())
 		}
 	}
+
 	return nil
+}
+
+func isEmpty(s string) bool {
+	// filepath.Clean converts "" to "."
+	return s == "" || s == "."
+}
+
+func newNotLocalErr(name, path string) error {
+	return fmt.Errorf("%w: %s is not a local path, path = %s", ErrInvalidInput, name, path)
 }
 
 // localize converts all paths to localized form
 // by calling filepath.FromSlash on each path field.
-func (o ProjectDirOption) localize() ProjectDirOption {
-	return ProjectDirOption{
-		Archive:    o.Archive,
-		Prefix:     filepath.Clean(filepath.FromSlash(o.Prefix)),
-		ComposeYml: filepath.FromSlash(o.ComposeYml),
-		TempDir:    filepath.FromSlash(o.TempDir),
-	}
+func (o ProjectDir) localize() ProjectDir {
+	o.prefix = filepath.Clean(filepath.FromSlash(o.prefix))
+	o.composeYml = filepath.Clean(filepath.FromSlash(o.composeYml))
+	o.tempDir = filepath.Clean(filepath.FromSlash(o.tempDir))
+	return o
 }
 
-// Prepare copies contents of Archive into TempDir and mkdir all directories under TempDir specified by distSet,
-// returns mutable afero.Fs instances by setting each field of mutableFsSet.
-// dirSet and mutableFsInstances flat structs and must be paired.
-// For mutableFsSet to be mutated by Prepare, it must be pointer to the struct.
+// Prepare copies contents of Archive into a temp directory and
+// mkdir all directories specified by dirSet under the temp directory.
+// Handlers for those created directories are returned through dirHandle as mutable afero.Fs instances.
 //
-// dirSet and mutableFsSet must be paired structs.
-// dirSet must have a or more exported string fields.
-// mutableFsSet must have exact same field names as dirSet and all must be afero.Fs type.
-// Note that all paths must be slash separated.
+// dirSet and dirHandle must be flat structs and must have exact same field names to each other.
+// For dirHandle is mutated by Prepare, it must be a pointer to a non nil instance of the struct.
+//
+// Exported fields of dirSet and dirHandle must only be string type, afero.Fs type respectively.
+//
+// In case caller does not need to mutate prepared dir, arguments can just be both nil.
+//
+// Note that all paths must be slash separated for better compatibility.
 //
 // For example, definitions and call signature should be like below:
 //
@@ -84,141 +143,150 @@ func (o ProjectDirOption) localize() ProjectDirOption {
 //		RuntimeEnvFiles string
 //	}
 //
-//	type MutableFsSet struct {
+//	type DirHandle struct {
 //		RuntimeEnvFiles afero.Fs
 //	}
 //
-//	var dirSet DirSet
-//	var mutableFsSet MutableFsSet
-//	composePath, err := LoadOption{}.Prepare(dirSet, &mutableFsSet)
-func (o ProjectDirOption) Prepare(dirSet, mutableFsSet any) (composePath string, err error) {
-	localOpt := o.localize()
-
-	if err := localOpt.Err(); err != nil {
-		return "", err
+//	var set DirSet
+//	var handle DirHandle
+//	composePath, err := composeloader.NewProjectDir(archive, "path/to/compose.yml").Prepare(set, &handle)
+func (o ProjectDir) Prepare(dirSet, dirHandle any) (dir, composePath string, err error) {
+	if err := o.Err(); err != nil {
+		return "", "", err
 	}
 
-	dRv := reflect.ValueOf(dirSet)
-	mRv := reflect.ValueOf(mutableFsSet)
+	lo := o.localize()
 
-	if err := checkValidity(dRv, mRv); err != nil {
-		return "", err
+	sRv := reflect.ValueOf(dirSet)
+	hRv := reflect.ValueOf(dirHandle)
+
+	if err := validPrepareInput(sRv, hRv); err != nil {
+		return "", "", err
 	}
 
-	if localOpt.TempDir == "" {
-		localOpt.TempDir, err = os.MkdirTemp("", "composeloader_*")
+	hRv = hRv.Elem()
+
+	if isEmpty(lo.tempDir) {
+		lo.tempDir, err = os.MkdirTemp("", "composeloader_*")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		defer func() {
-			if err != nil {
-				_ = os.RemoveAll(localOpt.TempDir)
+			if lo.cleanTempDirOnError && err != nil {
+				_ = os.RemoveAll(lo.tempDir)
 			}
 		}()
 	}
 
-	tempDirPath := localOpt.TempDir
-	if localOpt.Prefix != "" {
-		tempDirPath = filepath.Join(tempDirPath, localOpt.Prefix)
+	composeDirPath := lo.tempDir
+	if !isEmpty(lo.prefix) {
+		composeDirPath = filepath.Join(composeDirPath, lo.prefix)
 	}
-	tempDir := afero.NewBasePathFs(afero.NewOsFs(), tempDirPath)
-	err = fsutil.CopyFS(tempDir, localOpt.Archive)
+	composeDir := afero.NewBasePathFs(afero.NewOsFs(), composeDirPath)
+	err = fsutil.CopyFS(composeDir, lo.archive)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func() {
-		if err != nil {
-			_ = fsutil.CleanDir(tempDir, "")
+		if lo.cleanTempDirOnError && err != nil {
+			_ = fsutil.CleanDir(composeDir, "")
 		}
 	}()
 
-	composePath = filepath.Join(localOpt.TempDir, localOpt.ComposeYml)
-	_, err = tempDir.Stat(localOpt.ComposeYml)
+	composePath = filepath.Join(composeDirPath, lo.composeYml)
+	_, err = composeDir.Stat(lo.composeYml)
 	if err != nil {
-		return "", fmt.Errorf("%w: could not read ComposeYml path, %w", ErrInvalidInput, err)
+		return "", "", fmt.Errorf("%w: could not read ComposeYml path, %w", ErrInvalidInput, err)
 	}
 
-	for i := 0; i < dRv.NumField(); i++ {
-		field := dRv.Field(i)
-		// field.String() does not panic upon invoked for non string field.
-		// That's not what we want it to be.
-		name, path := dRv.Type().Field(i).Name, field.Interface().(string)
-		path = filepath.Clean(filepath.FromSlash(path))
+	tempDir := afero.NewBasePathFs(afero.NewOsFs(), lo.tempDir)
+	if sRv.Kind() == reflect.Struct {
+		for i := 0; i < sRv.NumField(); i++ {
+			field := sRv.Field(i)
+			// field.String() does not panic upon invoked for non string field.
+			// That's not what we want it to be.
+			name, path := sRv.Type().Field(i).Name, field.Interface().(string)
+			path = filepath.Clean(filepath.FromSlash(path))
 
-		err = tempDir.MkdirAll(path, fs.ModeDir&0o777)
-		if err != nil {
-			return "", err
+			err = tempDir.MkdirAll(path, fs.ModeDir&0o777)
+			if err != nil {
+				return "", "", err
+			}
+
+			fsys := afero.NewBasePathFs(afero.NewOsFs(), filepath.Join(lo.tempDir, path))
+			aferoField := hRv.FieldByName(name)
+			aferoField.Set(reflect.ValueOf(fsys))
 		}
-
-		fsys := afero.NewBasePathFs(afero.NewOsFs(), filepath.Join(localOpt.TempDir, path))
-		aferoField := mRv.FieldByName(name)
-		aferoField.Set(reflect.ValueOf(fsys))
 	}
 
-	return composePath, nil
+	return lo.tempDir, composePath, nil
 }
 
-func checkValidity(dRv, mRv reflect.Value) error {
-	if dRv.Kind() != reflect.Struct {
+func validPrepareInput(sRv, hRv reflect.Value) error {
+	if sRv.Kind() == reflect.Invalid && hRv.Kind() == reflect.Invalid {
+		// both nil indicates no path and no handle.
+		return nil
+	}
+
+	if sRv.Kind() != reflect.Struct {
 		return fmt.Errorf(
 			"%w: dirSet must be a struct type but kind is %s",
-			ErrInvalidInput, dRv.Kind(),
+			ErrInvalidInput, sRv.Kind(),
 		)
 	}
 
-	if mRv.Kind() != reflect.Pointer || mRv.Elem().Kind() != reflect.Struct {
+	if hRv.Kind() != reflect.Pointer || hRv.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf(
-			"%w: mutableFsSet must be a pointer type pointing to a struct but kind is %s",
-			ErrInvalidInput, mRv.Kind(),
+			"%w: dirHandle must be a pointer type pointing to a struct but kind is %s",
+			ErrInvalidInput, hRv.Kind(),
 		)
 	}
 
-	mRv = mRv.Elem()
+	hRv = hRv.Elem()
 
-	if dRv.NumField() != mRv.NumField() {
+	if sRv.NumField() != hRv.NumField() {
 		return fmt.Errorf(
-			"%w: unmatched NumField, dirSet and mutableFsSet must have exact same keyed exported fields,"+
-				" dirSet has %d fields, mutableFsSet has %d fields.",
-			ErrInvalidInput, dRv.NumField(), mRv.NumField(),
+			"%w: unmatched NumField, dirSet and dirHandle must have exact same keyed exported fields,"+
+				" dirSet has %d fields, dirHandle has %d fields.",
+			ErrInvalidInput, sRv.NumField(), hRv.NumField(),
 		)
 	}
 
-	mFieldSet := make(map[string]struct{})
-	for i := 0; i < mRv.NumField(); i++ {
-		mFieldSet[mRv.Type().Field(i).Name] = struct{}{}
-		field := mRv.Type().Field(i)
+	hFieldSet := make(map[string]struct{})
+	for i := 0; i < hRv.NumField(); i++ {
+		hFieldSet[hRv.Type().Field(i).Name] = struct{}{}
+		field := hRv.Type().Field(i)
 		if !field.Type.Implements(aferoFsType) {
 			return fmt.Errorf(
-				"%w: mutableFsSet must only have exported afero.Fs field, but is %T",
-				ErrInvalidInput, field,
+				"%w: dirHandle must only have exported afero.Fs field, but is %s",
+				ErrInvalidInput, field.Type.String(),
 			)
 		}
 	}
 
-	for i := 0; i < dRv.NumField(); i++ {
+	for i := 0; i < sRv.NumField(); i++ {
 		// It does not need to be exact same layout (definition order).
-		dirSetField := dRv.Field(i)
-		dirSetFieldName := dRv.Type().Field(i).Name
+		dirSetField := sRv.Field(i)
+		dirSetFieldName := sRv.Type().Field(i).Name
 		if dirSetField.Kind() != reflect.String {
 			return fmt.Errorf(
 				"%w: dirSet must only have exported string fields, but field %s has %s field",
 				ErrInvalidInput, dirSetFieldName, dirSetField.Kind(),
 			)
 		}
-		if _, ok := mFieldSet[dirSetFieldName]; !ok {
+		if _, ok := hFieldSet[dirSetFieldName]; !ok {
 			return fmt.Errorf(
-				"%w: dirSet and mutableFsSet must have exact same keyed exported fields, but field %s does not exist in mutableFsSet",
+				"%w: dirSet and dirHandle must have exact same keyed exported fields, but field %s does not exist in dirHandle",
 				ErrInvalidInput, dirSetFieldName,
 			)
 		}
 
 		v := dirSetField.Interface().(string)
 		if v == "" {
-			return fmt.Errorf("%w: dirSet is specifying empty directory", ErrInvalidInput)
+			return fmt.Errorf("%w: dirSet specifies empty directory", ErrInvalidInput)
 		}
-		v = filepath.Clean(filepath.FromSlash(v))
-		if filepath.IsAbs(v) || strings.Contains(v, "..") {
-			return fmt.Errorf("%w: dirSet is specifying absolute directory or parent directory.", ErrInvalidInput)
+		if !filepath.IsLocal(v) {
+			return fmt.Errorf("%w: dirSet specifies absolute directory or parent directory.", ErrInvalidInput)
 		}
 	}
 
