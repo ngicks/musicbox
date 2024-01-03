@@ -28,7 +28,7 @@ func Equal(l, r fs.FS) (bool, error) {
 		}
 
 		if !d.IsDir() && d.Type()&fs.ModeType != 0 {
-			return fmt.Errorf("fsutil.Equal: only directories and regular files are supported")
+			return fmt.Errorf("only directories and regular files are supported")
 		}
 
 		var lf, rf fs.File
@@ -74,7 +74,7 @@ func Equal(l, r fs.FS) (bool, error) {
 			}
 
 			if len(ldirents) != len(rdirents) {
-				return fmt.Errorf("fsutil.Equal: content mismatch, dir = %s", path)
+				return fmt.Errorf("content mismatch, dir = %s", path)
 			}
 		} else {
 			equal, err = sameFile(lf, rf)
@@ -94,6 +94,9 @@ func Equal(l, r fs.FS) (bool, error) {
 	}
 	if errors.Is(err, fakeErr) {
 		err = nil
+	}
+	if err != nil {
+		err = fmt.Errorf("fsutil.Equal: %w", err)
 	}
 
 	return equal, err

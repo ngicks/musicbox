@@ -1,12 +1,21 @@
 package fsutil
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/afero"
 )
 
 func CleanDir(fsys afero.Fs, path string) error {
+	err := cleanDir(fsys, path)
+	if err != nil {
+		return fmt.Errorf("fsutil.CleanDir: %w", err)
+	}
+	return nil
+}
+
+func cleanDir(fsys afero.Fs, path string) error {
 	dir, err := fsys.Open(path)
 	if err != nil {
 		return err

@@ -23,7 +23,7 @@ import (
 // Note that this method does not allow dst to have existing files and merging them.
 func CopyFS(dst afero.Fs, src fs.FS) error {
 	var buf []byte
-	return fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 				err = nil
 			}
 			if err != nil {
-				return fmt.Errorf("CopyFS: failed to chmod created dir, targ = %s, err = %w", targ, err)
+				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", targ, err)
 			}
 			return nil
 		}
@@ -67,7 +67,7 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 		defer func() { _ = r.Close() }()
 
 		if d.Type()&fs.ModeType != 0 {
-			return fmt.Errorf("CopyFS: non regular file is not supported.")
+			return fmt.Errorf("non regular file is not supported.")
 		}
 
 		info, err := r.Stat()
@@ -86,7 +86,7 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 		}
 		if _, err := io.CopyBuffer(w, r, buf); err != nil {
 			_ = w.Close()
-			return fmt.Errorf("CopyFS: copying %s, %w", path, err)
+			return fmt.Errorf("copying %s, %w", path, err)
 		}
 		if err := w.Close(); err != nil {
 			return err
@@ -94,4 +94,9 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 
 		return nil
 	})
+
+	if err != nil {
+		return fmt.Errorf("fsutil.CopyFS: %w", err)
+	}
+	return nil
 }
