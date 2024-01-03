@@ -43,8 +43,15 @@ func CopyContents(dirHandle, contents any) error {
 	hRv := reflect.ValueOf(dirHandle)
 	cRv := reflect.ValueOf(contents)
 
-	if err := validCopyContentsInput(hRv, cRv); err != nil {
+	if err := validCopyContentsInput(hRv, cRv, false); err != nil {
 		return err
+	}
+
+	if hRv.Kind() == reflect.Pointer && !hRv.IsNil() {
+		hRv = hRv.Elem()
+	}
+	if cRv.Kind() == reflect.Pointer && !cRv.IsNil() {
+		cRv = cRv.Elem()
 	}
 
 	for i := 0; i < hRv.NumField(); i++ {
@@ -63,7 +70,14 @@ func CopyContents(dirHandle, contents any) error {
 	return nil
 }
 
-func validCopyContentsInput(hRv, cRv reflect.Value) error {
+func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {
+	if hRv.Kind() == reflect.Pointer && !hRv.IsNil() {
+		hRv = hRv.Elem()
+	}
+	if cRv.Kind() == reflect.Pointer && !cRv.IsNil() {
+		cRv = cRv.Elem()
+	}
+
 	if hRv.Kind() != reflect.Struct {
 		return fmt.Errorf("%w: dirHandle is not a struct", ErrInvalidInput)
 	}
@@ -87,7 +101,7 @@ func validCopyContentsInput(hRv, cRv reflect.Value) error {
 				ErrInvalidInput, st.Type.String(),
 			)
 		}
-		if hRv.Field(i).IsNil() {
+		if !allowNilField && hRv.Field(i).IsNil() {
 			return fmt.Errorf("%w: dirHandle must not have nil field", ErrInvalidInput)
 		}
 	}

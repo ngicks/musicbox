@@ -25,9 +25,9 @@ func TestPrepare(t *testing.T) {
 		name        string
 		archive     fs.FS
 		composeYml  string
-		options     []ProjectDirOption
+		options     []ProjectDirOption[projectDirHandle]
 		expected    fs.FS
-		checkResult []func(tempDir, composeYml string, handle projectDirHandle) error
+		checkResult []func(tempDir, composeYml string, handle *projectDirHandle) error
 	}
 
 	projectDir := os.DirFS("testdata/project")
@@ -37,22 +37,28 @@ func TestPrepare(t *testing.T) {
 		panic(err)
 	}
 
+	content := projectContent{RuntimeEnvFiles: os.DirFS("testdata/runtime_env")}
+	initialContentOption, err := WithInitialContent[projectDirHandle](content)
+	if err != nil {
+		panic(err)
+	}
+
 	for _, tc := range []testCase{
 		{
 			name:       "prefixed",
 			archive:    projectDir,
 			composeYml: "compose.yml",
-			options:    []ProjectDirOption{WithPrefix("foo")},
+			options:    []ProjectDirOption[projectDirHandle]{WithPrefix[projectDirHandle]("foo"), initialContentOption},
 			expected:   os.DirFS("testdata/expected/prefixed"),
 		},
 		{
 			name:       "non-prefixed",
 			archive:    projectDir,
 			composeYml: "compose.yml",
-			options:    []ProjectDirOption{WithTempDir(preMadeTempDir)},
+			options:    []ProjectDirOption[projectDirHandle]{WithTempDir[projectDirHandle](preMadeTempDir), initialContentOption},
 			expected:   os.DirFS("testdata/expected/non-prefixed"),
-			checkResult: [](func(tempDir string, composeYml string, handle projectDirHandle) error){
-				func(tempDir, composeYml string, handle projectDirHandle) error {
+			checkResult: [](func(tempDir string, composeYml string, handle *projectDirHandle) error){
+				func(tempDir, composeYml string, handle *projectDirHandle) error {
 					if tempDir != preMadeTempDir {
 						return fmt.Errorf("tempDir is not one set with an option, expected = %s, actual = %s", preMadeTempDir, tempDir)
 					}
@@ -63,42 +69,37 @@ func TestPrepare(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.options == nil {
-				tc.options = []ProjectDirOption{}
+				tc.options = []ProjectDirOption[projectDirHandle]{}
 			}
 
-			dir := NewProjectDir(tc.archive, tc.composeYml, tc.options...)
-
-			dirSet := projectDirSet{
-				RuntimeEnvFiles: "runtime_env",
-			}
-			dirHandle := projectDirHandle{}
-
-			tempDir, composeYml, err := dir.Prepare(dirSet, &dirHandle)
+			dir, err := PrepareProjectDir[projectDirHandle](
+				tc.archive,
+				tc.composeYml,
+				projectDirSet{
+					RuntimeEnvFiles: "runtime_env",
+				},
+				tc.options...,
+			)
 			assert.NilError(t, err)
+
 			defer func() {
-				err := os.RemoveAll(tempDir)
+				err := os.RemoveAll(dir.Dir())
 				if err != nil {
 					t.Logf("tempDir removal failed = %#v", err)
 				}
 			}()
 
-			bin, err := os.ReadFile(composeYml)
+			bin, err := os.ReadFile(dir.ComposeYmlPath())
 			assert.NilError(t, err)
 			assert.Assert(t, bytes.Equal(composeYmlBin, bin))
 
-			err = CopyContents(
-				dirHandle,
-				projectContent{RuntimeEnvFiles: os.DirFS("testdata/runtime_env")},
-			)
-			assert.NilError(t, err)
-
-			eq, err := fsutil.Equal(os.DirFS(tempDir), tc.expected)
+			eq, err := fsutil.Equal(os.DirFS(dir.Dir()), tc.expected)
 			assert.NilError(t, err)
 			assert.Assert(t, eq)
 
 			if tc.checkResult != nil {
 				for _, checker := range tc.checkResult {
-					assert.NilError(t, checker(tempDir, composeYml, dirHandle))
+					assert.NilError(t, checker(dir.Dir(), dir.ComposeYmlPath(), dir.Handle()))
 				}
 			}
 		})

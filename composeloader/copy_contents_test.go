@@ -83,7 +83,7 @@ func TestCopyContents_validCopyContentsInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			hRv := reflect.ValueOf(tc.h)
 			cRv := reflect.ValueOf(tc.c)
-			err := validCopyContentsInput(hRv, cRv)
+			err := validCopyContentsInput(hRv, cRv, false)
 			if tc.err == nil {
 				assert.NilError(t, err)
 			} else {
