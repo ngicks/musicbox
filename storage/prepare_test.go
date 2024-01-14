@@ -1,4 +1,4 @@
-package composeloader
+package storage
 
 import (
 	"bytes"

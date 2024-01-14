@@ -1,4 +1,4 @@
-package composeloader
+package storage
 
 import (
 	"fmt"
@@ -68,6 +68,10 @@ func CopyContents(dirHandle, contents any) error {
 	}
 
 	return nil
+}
+
+func ValidateCopyContentsInput(dirHandle, dirContents any, allowNilField bool) error {
+	return validCopyContentsInput(reflect.ValueOf(dirHandle), reflect.ValueOf(dirContents), allowNilField)
 }
 
 func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {

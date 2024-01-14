@@ -5,8 +5,18 @@ package example
 import (
 	"io/fs"
 
+	"github.com/ngicks/musicbox/storage"
 	"github.com/spf13/afero"
 )
+
+func PrepareProjectDir(
+	archive fs.FS,
+	composeYml string,
+	dirSet DirSet,
+	opts ...storage.ProjectDirOption[DirHandle],
+) (*storage.ProjectDir[DirHandle], error) {
+	return storage.PrepareProjectDir[DirHandle](archive, composeYml, dirSet, opts...)
+}
 
 type DirSet struct {
 	Foo string

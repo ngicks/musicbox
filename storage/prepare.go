@@ -1,4 +1,4 @@
-package composeloader
+package storage
 
 import (
 	"errors"
@@ -98,6 +98,12 @@ func WithInitialContent[T any](initialContents any) (ProjectDirOption[T], error)
 //	}
 //
 //	composePath, err := composeloader.PrepareProjectDir[DirHandle](archive, "path/to/compose.yml", DirSet{RuntimeEnvFiles: "runtime_env"})
+//
+// You can use the code generator to generate those types.
+//
+//	go run -mod=mod github.com/ngicks/musicbox/composeloader/cmd/gentypes@latest -pkg example -fields Foo,Bar,Baz -o ./example.generated.go
+//
+// See ./example for generated result.
 func PrepareProjectDir[T any](archive fs.FS, composeYml string, dirSet any, opts ...ProjectDirOption[T]) (*ProjectDir[T], error) {
 	var handle T
 	d := &ProjectDir[T]{
@@ -159,6 +165,10 @@ func isEmpty(s string) bool {
 
 func newNotLocalErr(name, path string) error {
 	return fmt.Errorf("%w: %s is not a local path, path = %s", ErrInvalidInput, name, path)
+}
+
+func ValidatePrepareInput(dirSet, dirHandle any) error {
+	return validPrepareInput(reflect.ValueOf(dirSet), reflect.ValueOf(dirHandle))
 }
 
 func validPrepareInput(sRv, hRv reflect.Value) error {

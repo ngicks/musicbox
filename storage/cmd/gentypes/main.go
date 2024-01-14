@@ -13,7 +13,7 @@ var (
 	pkg    = flag.String("pkg", "", "package name for generated go code.")
 	prefix = flag.String("prefix", "Dir", "prefix for generated types. It'll generate <prefix>Set, <prefix>Handle, <prefix>Contents.")
 	fields = flag.String("fields", "", "comma separated fields names for generated types.")
-	out    = flag.String("o", "-", "path to output file. `-` means stdout.")
+	out    = flag.String("o", "--", "path to output file. `--` means stdout.")
 )
 
 type tempInput struct {
@@ -29,8 +29,18 @@ package {{.PkgName}}
 import (
 	"io/fs"
 
+	"github.com/ngicks/musicbox/storage"
 	"github.com/spf13/afero"
 )
+
+func PrepareProjectDir(
+	archive fs.FS,
+	composeYml string,
+	dirSet {{.Prefix}}Set,
+	opts ...storage.ProjectDirOption[{{.Prefix}}Handle],
+) (*storage.ProjectDir[{{.Prefix}}Handle], error) {
+	return storage.PrepareProjectDir[{{.Prefix}}Handle](archive, composeYml, dirSet, opts...)
+}
 
 type {{.Prefix}}Set struct {
 {{range $index, $element := .Fields}}	{{$element}} string

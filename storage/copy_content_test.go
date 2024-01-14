@@ -1,4 +1,4 @@
-package composeloader
+package storage
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 
 	"github.com/ngicks/musicbox/fsutil"
 	"github.com/spf13/afero"
-	"gotest.tools/v3/assert"
+	"gotest.tools/assert"
 )
 
 func TestCopyContents_validCopyContentsInput(t *testing.T) {
