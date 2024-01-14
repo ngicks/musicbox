@@ -11,7 +11,12 @@ import (
 var fakeErr = errors.New("fake")
 
 // Equal compares l and r and returns true if both have same contents.
-// The comparison evaluates mode bits, content of regular files. It ignores mod time.
+//
+// The comparison evaluates
+//   - mode bits of dirents
+//   - content of directory
+//   - content of regular files
+//
 // Equal returns immediately an error if l has other than directories or regular files.
 //
 // Note that mode bits of the root directory is ignored since often it is not controlled.
@@ -20,6 +25,7 @@ var fakeErr = errors.New("fake")
 //   - Equal takes stat of every file in l and r.
 //   - Also all dirents of directories are read.
 //   - When comparing regular files, 2 * 32KiB slices are allocated.
+//   - Files are entirely read
 func Equal(l, r fs.FS) (bool, error) {
 	equal := true
 	err := fs.WalkDir(l, ".", func(path string, d fs.DirEntry, err error) error {
