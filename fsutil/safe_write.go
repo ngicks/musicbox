@@ -48,15 +48,15 @@ func WithDisableMkdir(disableMkdir bool) SafeWriteOptionOption {
 	}
 }
 
-func WithDirPerm(dirPerm fs.FileMode) SafeWriteOptionOption {
-	return func(o *SafeWriteOption) {
-		o.dirPerm = dirPerm.Perm()
-	}
-}
-
 func WithForcePerm(forcePerm bool) SafeWriteOptionOption {
 	return func(o *SafeWriteOption) {
 		o.forcePerm = forcePerm
+	}
+}
+
+func WithDisableRemoveOnErr(disableRemoveOnErr bool) SafeWriteOptionOption {
+	return func(o *SafeWriteOption) {
+		o.disableRemoveOnErr = disableRemoveOnErr
 	}
 }
 
@@ -150,10 +150,10 @@ type SafeWriteOption struct {
 
 	// If true and parent directories of dst and tmpDirName are non existent, returns an err immediately.
 	disableMkdir bool
-	// If non zero, SafeWrite uses this perm as an argument for MkdirAll.
-	dirPerm fs.FileMode
 	// If true, SafeWrite perform Chmod after each file creation.
 	forcePerm bool
+	// If true, SafeWrite will not try to delete temporary files on an occurrence of an error.
+	disableRemoveOnErr bool
 
 	// If non negative number, SafeWrite performs Chown after each file creation.
 	uid, gid int
@@ -294,7 +294,7 @@ func (o SafeWriteOption) safeWrite(
 	dst = filepath.FromSlash(dst)
 
 	if !o.disableMkdir {
-		err = mkdirAll(fsys, o.tempDir(dst), o.dirPerm)
+		err = mkdirAll(fsys, o.tempDir(dst), fs.ModePerm)
 		// We do not call chmod for dirs since
 		// it can be invoked by the caller anytime if they wish to.
 		if err != nil {
@@ -323,7 +323,7 @@ func (o SafeWriteOption) safeWrite(
 
 	defer func() {
 		_ = closeOnce()
-		if err != nil {
+		if err != nil && !o.disableRemoveOnErr {
 			_ = fsys.Remove(tmpName)
 		}
 	}()
@@ -377,7 +377,7 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	if !o.disableMkdir {
-		err = mkdirAll(fsys, filepath.Dir(dst), o.dirPerm)
+		err = mkdirAll(fsys, filepath.Dir(dst), fs.ModePerm)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, mkdirAll: %w", err)
 		}
