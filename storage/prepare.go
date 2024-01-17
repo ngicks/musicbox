@@ -19,6 +19,51 @@ var (
 	fsFsType    = reflect.TypeOf((*fs.FS)(nil)).Elem()
 )
 
+func PrepareHandle[S, H any](base afero.Fs, pathSet S, initialContents any) (H, error) {
+	var handle, zero H
+
+	sRv := reflect.ValueOf(pathSet)
+	hRv := reflect.ValueOf(&handle)
+
+	if err := validPrepareInput(sRv, hRv); err != nil {
+		return zero, err
+	}
+
+	hRv = hRv.Elem()
+
+	for i := 0; i < sRv.NumField(); i++ {
+		field := sRv.Field(i)
+		// field.String() does not panic upon invoked for non string field.
+		// That's not what we want it to be.
+		name, path := sRv.Type().Field(i).Name, field.Interface().(string)
+		path = filepath.Clean(filepath.FromSlash(path))
+
+		err := base.MkdirAll(path, fs.ModeDir|0o777)
+		if err != nil {
+			return zero, err
+		}
+
+		fsys := afero.NewBasePathFs(base, path)
+		aferoField := hRv.FieldByName(name)
+		aferoField.Set(reflect.ValueOf(fsys))
+	}
+
+	if initialContents != nil {
+		icRv := reflect.ValueOf(initialContents)
+		err := validCopyContentsInput(hRv, icRv, true)
+		if err != nil {
+			return zero, err
+		}
+		err = CopyContents(handle, initialContents)
+		if err != nil {
+			return zero, err
+		}
+	}
+
+	return handle, nil
+
+}
+
 // ProjectDir is an option for project dir extracted from Archive.
 // All paths must be slash separated even on Window.
 type ProjectDir[T any] struct {
@@ -33,7 +78,7 @@ type ProjectDir[T any] struct {
 	tempDir string
 
 	dirSet              any
-	dirHandle           *T
+	pathHandle          *T
 	initialContents     any
 	cleanTempDirOnError bool
 }
@@ -78,10 +123,10 @@ func WithInitialContent[T any](initialContents any) (ProjectDirOption[T], error)
 // PrepareProjectDir returns a newly created ProjectDir.
 // archive must contain compose.yml at the path composeYml is pointing to.
 //
-// dirSet and dirHandle must be flat structs and must have exact same field names to each other.
-// For dirHandle is mutated by Prepare, it must be a pointer to a non nil instance of the struct.
+// dirSet and pathHandle must be flat structs and must have exact same field names to each other.
+// For pathHandle is mutated by Prepare, it must be a pointer to a non nil instance of the struct.
 //
-// Exported fields of dirSet and dirHandle must only be string type, afero.Fs type respectively.
+// Exported fields of dirSet and pathHandle must only be string type, afero.Fs type respectively.
 //
 // In case caller does not need to mutate prepared dir, arguments can just be both nil.
 //
@@ -93,11 +138,11 @@ func WithInitialContent[T any](initialContents any) (ProjectDirOption[T], error)
 //		RuntimeEnvFiles string
 //	}
 //
-//	type DirHandle struct {
+//	type pathHandle struct {
 //		RuntimeEnvFiles afero.Fs
 //	}
 //
-//	composePath, err := composeloader.PrepareProjectDir[DirHandle](archive, "path/to/compose.yml", DirSet{RuntimeEnvFiles: "runtime_env"})
+//	composePath, err := composeloader.PrepareProjectDir[pathHandle](archive, "path/to/compose.yml", DirSet{RuntimeEnvFiles: "runtime_env"})
 //
 // You can use the code generator to generate those types.
 //
@@ -110,7 +155,7 @@ func PrepareProjectDir[T any](archive fs.FS, composeYml string, dirSet any, opts
 		archive:    archive,
 		composeYml: composeYml,
 		dirSet:     dirSet,
-		dirHandle:  &handle,
+		pathHandle: &handle,
 	}
 
 	for _, opt := range opts {
@@ -151,7 +196,7 @@ func (o ProjectDir[T]) err() error {
 		}
 	}
 
-	if err := validPrepareInput(reflect.ValueOf(o.dirSet), reflect.ValueOf(o.dirHandle)); err != nil {
+	if err := validPrepareInput(reflect.ValueOf(o.dirSet), reflect.ValueOf(o.pathHandle)); err != nil {
 		return err
 	}
 
@@ -167,8 +212,8 @@ func newNotLocalErr(name, path string) error {
 	return fmt.Errorf("%w: %s is not a local path, path = %s", ErrInvalidInput, name, path)
 }
 
-func ValidatePrepareInput(dirSet, dirHandle any) error {
-	return validPrepareInput(reflect.ValueOf(dirSet), reflect.ValueOf(dirHandle))
+func ValidatePrepareInput(pathSet, pathHandle any) error {
+	return validPrepareInput(reflect.ValueOf(pathSet), reflect.ValueOf(pathHandle))
 }
 
 func validPrepareInput(sRv, hRv reflect.Value) error {
@@ -186,7 +231,7 @@ func validPrepareInput(sRv, hRv reflect.Value) error {
 
 	if hRv.Kind() != reflect.Pointer || hRv.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf(
-			"%w: dirHandle must be a pointer type pointing to a struct but kind is %s",
+			"%w: pathHandle must be a pointer type pointing to a struct but kind is %s",
 			ErrInvalidInput, hRv.Kind(),
 		)
 	}
@@ -195,8 +240,8 @@ func validPrepareInput(sRv, hRv reflect.Value) error {
 
 	if sRv.NumField() != hRv.NumField() {
 		return fmt.Errorf(
-			"%w: unmatched NumField, dirSet and dirHandle must have exact same keyed exported fields,"+
-				" dirSet has %d fields, dirHandle has %d fields.",
+			"%w: unmatched NumField, dirSet and pathHandle must have exact same keyed exported fields,"+
+				" dirSet has %d fields, pathHandle has %d fields.",
 			ErrInvalidInput, sRv.NumField(), hRv.NumField(),
 		)
 	}
@@ -207,7 +252,7 @@ func validPrepareInput(sRv, hRv reflect.Value) error {
 		field := hRv.Type().Field(i)
 		if !field.Type.Implements(aferoFsType) {
 			return fmt.Errorf(
-				"%w: dirHandle must only have exported afero.Fs field, but is %s",
+				"%w: pathHandle must only have exported afero.Fs field, but is %s",
 				ErrInvalidInput, field.Type.String(),
 			)
 		}
@@ -225,7 +270,7 @@ func validPrepareInput(sRv, hRv reflect.Value) error {
 		}
 		if _, ok := hFieldSet[dirSetFieldName]; !ok {
 			return fmt.Errorf(
-				"%w: dirSet and dirHandle must have exact same keyed exported fields, but field %s does not exist in dirHandle",
+				"%w: dirSet and pathHandle must have exact same keyed exported fields, but field %s does not exist in pathHandle",
 				ErrInvalidInput, dirSetFieldName,
 			)
 		}
@@ -253,7 +298,7 @@ func (o ProjectDir[T]) localize() ProjectDir[T] {
 
 // Prepare copies contents of Archive into a temp directory and
 // mkdir all directories specified by dirSet under the temp directory.
-// Handlers for those created directories are returned through dirHandle as mutable afero.Fs instances.
+// Handlers for those created directories are returned through pathHandle as mutable afero.Fs instances.
 func (d *ProjectDir[T]) prepare() (err error) {
 	if err := d.err(); err != nil {
 		return err
@@ -262,7 +307,7 @@ func (d *ProjectDir[T]) prepare() (err error) {
 	*d = d.localize()
 
 	sRv := reflect.ValueOf(d.dirSet)
-	hRv := reflect.ValueOf(d.dirHandle)
+	hRv := reflect.ValueOf(d.pathHandle)
 
 	hRv = hRv.Elem()
 
@@ -342,5 +387,5 @@ func (d *ProjectDir[T]) ComposeYmlPath() string {
 }
 
 func (d *ProjectDir[T]) Handle() *T {
-	return d.dirHandle
+	return d.pathHandle
 }

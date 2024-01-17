@@ -9,13 +9,12 @@ import (
 	"github.com/spf13/afero"
 )
 
-func PrepareProjectDir(
-	archive fs.FS,
-	composeYml string,
-	dirSet DirSet,
-	opts ...storage.ProjectDirOption[DirHandle],
-) (*storage.ProjectDir[DirHandle], error) {
-	return storage.PrepareProjectDir[DirHandle](archive, composeYml, dirSet, opts...)
+func PrepareDir(
+	base afero.Fs,
+	pathSet DirSet,
+	initialContents DirContents,
+) (pathHandle, error) {
+	return storage.PrepareHandle[DirSet, pathHandle](base, pathSet, initialContents)
 }
 
 type DirSet struct {
@@ -24,7 +23,7 @@ type DirSet struct {
 	Baz string
 }
 
-type DirHandle struct {
+type pathHandle struct {
 	Foo afero.Fs
 	Bar afero.Fs
 	Baz afero.Fs

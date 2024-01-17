@@ -1,7 +1,7 @@
 github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
 github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
-github.com/ngicks/musicbox/fsutil v0.0.0-20240103174931-29f280b2cfbd h1:SkNFPXwqs0gEq0dmebyfVUoRQ8E2846ezi/HMy0jARs=
-github.com/ngicks/musicbox/fsutil v0.0.0-20240103174931-29f280b2cfbd/go.mod h1:26qAXXn8eehOaFc/GBqT3A9e5gYKAG+29B8LhHvS3dM=
+github.com/ngicks/musicbox/fsutil v0.0.0-20240114190950-ed6807e702d0 h1:Gzwm1Mw3/vXKZMHyZDTRmzUq8P0vrvp5GjcByA/LbQ8=
+github.com/ngicks/musicbox/fsutil v0.0.0-20240114190950-ed6807e702d0/go.mod h1:WllDkA0C3Rou55/tDi+pggWFuEzX427twj53c88NMa4=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/spf13/afero v1.11.0 h1:WJQKhtpdm3v2IzqG8VMqrr6Rf3UYpEF239Jy9wNepM8=

@@ -24,7 +24,6 @@ var fakeErr = errors.New("fake")
 // Performance:
 //   - Equal takes stat of every file in l and r.
 //   - Also all dirents of directories are read.
-//   - When comparing regular files, 2 * 32KiB slices are allocated.
 //   - Files are entirely read
 func Equal(l, r fs.FS) (bool, error) {
 	equal := true
@@ -69,17 +68,17 @@ func Equal(l, r fs.FS) (bool, error) {
 		}
 
 		if d.IsDir() {
-			ldirents, err := fs.ReadDir(l, path)
+			lDirents, err := fs.ReadDir(l, path)
 			if err != nil {
 				return err
 			}
 
-			rdirents, err := fs.ReadDir(r, path)
+			rDirents, err := fs.ReadDir(r, path)
 			if err != nil {
 				return err
 			}
 
-			if len(ldirents) != len(rdirents) {
+			if len(lDirents) != len(rDirents) {
 				return fmt.Errorf("content mismatch, dir = %s", path)
 			}
 		} else {
@@ -118,35 +117,41 @@ func sameFile(r, l fs.File) (bool, error) {
 		return false, err
 	}
 
-	rsize := rs.Size()
-	lsize := ls.Size()
+	rSize := rs.Size()
+	lSize := ls.Size()
 
-	if rsize != lsize {
+	if rSize != lSize {
 		return false, nil
 	}
 
-	if rsize == 0 {
+	if rSize == 0 {
 		return true, nil
 	}
 
-	size := int(rsize)
+	size := int(rSize)
 
-	bufr, bufl := make([]byte, 32*1024), make([]byte, 32*1024)
+	bufRefL, bufRefR := getBuf(), getBuf()
+	defer func() {
+		putBuf(bufRefL)
+		putBuf(bufRefR)
+	}()
+
+	bufL, bufR := *bufRefL, *bufRefR
 	for size > 0 {
-		if len(bufr) > size {
-			bufr = bufr[:size]
-			bufl = bufl[:size]
+		if len(bufR) > size {
+			bufR = bufR[:size]
+			bufL = bufL[:size]
 		}
-		_, err := io.ReadFull(r, bufr)
+		_, err := io.ReadFull(r, bufR)
 		if err != nil {
 			return false, err
 		}
-		n, err := io.ReadFull(l, bufl)
+		n, err := io.ReadFull(l, bufL)
 		if err != nil {
 			return false, err
 		}
 
-		if !bytes.Equal(bufr, bufl) {
+		if !bytes.Equal(bufR, bufL) {
 			return false, nil
 		}
 		size -= n

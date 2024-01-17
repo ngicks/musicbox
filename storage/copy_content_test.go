@@ -36,7 +36,7 @@ func TestCopyContents_validCopyContentsInput(t *testing.T) {
 		},
 		{
 			name: "mismatched field number",
-			h: dirHandle1{
+			h: pathHandle1{
 				Foo: afero.NewMemMapFs(),
 			},
 			c:   contents2{},
@@ -44,13 +44,13 @@ func TestCopyContents_validCopyContentsInput(t *testing.T) {
 		},
 		{
 			name: "invalid dir handle",
-			h:    invalidDirHandle{},
+			h:    invalidPathHandle{},
 			c:    contents2{},
 			err:  ErrInvalidInput,
 		},
 		{
 			name: "invalid contents",
-			h: dirHandle2{
+			h: pathHandle2{
 				Foo: afero.NewMemMapFs(),
 				Bar: afero.NewMemMapFs(),
 			},
@@ -59,7 +59,7 @@ func TestCopyContents_validCopyContentsInput(t *testing.T) {
 		},
 		{
 			name: "not same fields",
-			h: dirHandle3{
+			h: pathHandle3{
 				Foo: afero.NewMemMapFs(),
 				Baz: afero.NewMemMapFs(),
 			},
@@ -68,13 +68,13 @@ func TestCopyContents_validCopyContentsInput(t *testing.T) {
 		},
 		{
 			name: "invalid dir handle field",
-			h:    dirHandle1{},
+			h:    pathHandle1{},
 			c:    contents1{},
 			err:  ErrInvalidInput,
 		},
 		{
 			name: "valid",
-			h: dirHandle1{
+			h: pathHandle1{
 				Foo: afero.NewMemMapFs(),
 			},
 			c: contents1{},
@@ -115,7 +115,7 @@ type invalidContents struct {
 func TestCopyContents(t *testing.T) {
 
 	t.Run("copy", func(t *testing.T) {
-		handle := dirHandle2{
+		handle := pathHandle2{
 			Foo: afero.NewMemMapFs(),
 			Bar: afero.NewMemMapFs(),
 		}
@@ -161,7 +161,7 @@ func TestCopyContents(t *testing.T) {
 	})
 
 	t.Run("skip nil FS", func(t *testing.T) {
-		handle := dirHandle2{
+		handle := pathHandle2{
 			Foo: afero.NewMemMapFs(),
 			Bar: afero.NewMemMapFs(),
 		}

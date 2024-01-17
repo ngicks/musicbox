@@ -4,7 +4,8 @@
         "composeloader",
         "dire",
         "dirents",
-        "fsutil"
+        "fsutil",
+        "fsys"
     ],
     "go.lintTool": "golangci-lint",
     "go.inlayHints.assignVariableTypes": true,

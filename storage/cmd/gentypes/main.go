@@ -11,14 +11,14 @@ import (
 
 var (
 	pkg    = flag.String("pkg", "", "package name for generated go code.")
-	prefix = flag.String("prefix", "Dir", "prefix for generated types. It'll generate <prefix>Set, <prefix>Handle, <prefix>Contents.")
+	name   = flag.String("name", "Dir", "prefix for generated types. It'll generate <prefix>Set, <prefix>Handle, <prefix>Contents.")
 	fields = flag.String("fields", "", "comma separated fields names for generated types.")
 	out    = flag.String("o", "--", "path to output file. `--` means stdout.")
 )
 
 type tempInput struct {
 	PkgName string
-	Prefix  string
+	Name    string
 	Fields  []string
 }
 
@@ -33,26 +33,25 @@ import (
 	"github.com/spf13/afero"
 )
 
-func PrepareProjectDir(
-	archive fs.FS,
-	composeYml string,
-	dirSet {{.Prefix}}Set,
-	opts ...storage.ProjectDirOption[{{.Prefix}}Handle],
-) (*storage.ProjectDir[{{.Prefix}}Handle], error) {
-	return storage.PrepareProjectDir[{{.Prefix}}Handle](archive, composeYml, dirSet, opts...)
+func Prepare{{.Name}}(
+	base afero.Fs,
+	pathSet {{.Name}}Set,
+	initialContents {{.Name}}Contents,
+) ({{.Name}}Handle, error) {
+	return storage.PrepareHandle[{{.Name}}Set, {{.Name}}Handle](base, pathSet, initialContents)
 }
 
-type {{.Prefix}}Set struct {
+type {{.Name}}Set struct {
 {{range $index, $element := .Fields}}	{{$element}} string
 {{end -}}
 }
 
-type {{.Prefix}}Handle struct {
+type {{.Name}}Handle struct {
 {{range $index, $element := .Fields}}	{{$element}} afero.Fs
 {{end -}}
 }
 
-type {{.Prefix}}Contents struct {
+type {{.Name}}Contents struct {
 {{range $index, $element := .Fields}}	{{$element}} fs.FS
 {{end -}}
 }
@@ -74,7 +73,7 @@ func main() {
 
 	err := genTemp.Execute(buf, tempInput{
 		PkgName: *pkg,
-		Prefix:  *prefix,
+		Name:    *name,
 		Fields:  fieldsSlice,
 	})
 	if err != nil {

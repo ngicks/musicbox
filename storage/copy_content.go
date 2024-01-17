@@ -9,12 +9,12 @@ import (
 	"github.com/spf13/afero"
 )
 
-// CopyContents copies each field of contents to its corresponding field of dirHandle.
+// CopyContents copies each field of contents to its corresponding field of pathHandle.
 //
-// dirHandle and contents must be flat structs and
+// pathHandle and contents must be flat structs and
 // must only contain exported afero.Fs, fs.FS fields respectively.
 //
-//	type DirHandle struct {
+//	type pathHandle struct {
 //		RuntimeEnvFiles afero.Fs
 //	}
 //
@@ -23,7 +23,7 @@ import (
 //	}
 //
 //	composePath, err := composeloader.CopyContents(
-//		dirHandle,
+//		pathHandle,
 //		Contents{
 //			RuntimeEnvFiles: fstest.MapFS{
 //				"foo.env": &fstest.MapFile{
@@ -39,8 +39,8 @@ import (
 //			},
 //		},
 //	)
-func CopyContents(dirHandle, contents any) error {
-	hRv := reflect.ValueOf(dirHandle)
+func CopyContents(pathHandle, contents any) error {
+	hRv := reflect.ValueOf(pathHandle)
 	cRv := reflect.ValueOf(contents)
 
 	if err := validCopyContentsInput(hRv, cRv, false); err != nil {
@@ -70,8 +70,8 @@ func CopyContents(dirHandle, contents any) error {
 	return nil
 }
 
-func ValidateCopyContentsInput(dirHandle, dirContents any, allowNilField bool) error {
-	return validCopyContentsInput(reflect.ValueOf(dirHandle), reflect.ValueOf(dirContents), allowNilField)
+func ValidateCopyContentsInput(pathHandle, dirContents any, allowNilField bool) error {
+	return validCopyContentsInput(reflect.ValueOf(pathHandle), reflect.ValueOf(dirContents), allowNilField)
 }
 
 func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {
@@ -83,14 +83,14 @@ func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {
 	}
 
 	if hRv.Kind() != reflect.Struct {
-		return fmt.Errorf("%w: dirHandle is not a struct", ErrInvalidInput)
+		return fmt.Errorf("%w: pathHandle is not a struct", ErrInvalidInput)
 	}
 	if cRv.Kind() != reflect.Struct {
 		return fmt.Errorf("%w: initialContents is not a struct", ErrInvalidInput)
 	}
 
 	if hRv.NumField() != cRv.NumField() {
-		return fmt.Errorf("%w: dirHandle and initialContents mismatches their NumField", ErrInvalidInput)
+		return fmt.Errorf("%w: pathHandle and initialContents mismatches their NumField", ErrInvalidInput)
 	}
 
 	fieldNames := map[string]struct{}{}
@@ -101,12 +101,12 @@ func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {
 
 		if !st.Type.Implements(aferoFsType) {
 			return fmt.Errorf(
-				"%w: dirHandle must only have exported afero.Fs field, but is %s",
+				"%w: pathHandle must only have exported afero.Fs field, but is %s",
 				ErrInvalidInput, st.Type.String(),
 			)
 		}
 		if !allowNilField && hRv.Field(i).IsNil() {
-			return fmt.Errorf("%w: dirHandle must not have nil field", ErrInvalidInput)
+			return fmt.Errorf("%w: pathHandle must not have nil field", ErrInvalidInput)
 		}
 	}
 
@@ -122,7 +122,7 @@ func validCopyContentsInput(hRv, cRv reflect.Value, allowNilField bool) error {
 
 		if _, ok := fieldNames[st.Name]; !ok {
 			return fmt.Errorf(
-				"%w: dirHandle and contents must have exact same keyed exported fields, but field %s does not exist in dirHandle",
+				"%w: pathHandle and contents must have exact same keyed exported fields, but field %s does not exist in pathHandle",
 				ErrInvalidInput, st.Name,
 			)
 		}

@@ -25,9 +25,9 @@ func TestPrepare(t *testing.T) {
 		name        string
 		archive     fs.FS
 		composeYml  string
-		options     []ProjectDirOption[projectDirHandle]
+		options     []ProjectDirOption[projectPathHandle]
 		expected    fs.FS
-		checkResult []func(tempDir, composeYml string, handle *projectDirHandle) error
+		checkResult []func(tempDir, composeYml string, handle *projectPathHandle) error
 	}
 
 	projectDir := os.DirFS("testdata/project")
@@ -38,7 +38,7 @@ func TestPrepare(t *testing.T) {
 	}
 
 	content := projectContent{RuntimeEnvFiles: os.DirFS("testdata/runtime_env")}
-	initialContentOption, err := WithInitialContent[projectDirHandle](content)
+	initialContentOption, err := WithInitialContent[projectPathHandle](content)
 	if err != nil {
 		panic(err)
 	}
@@ -48,17 +48,17 @@ func TestPrepare(t *testing.T) {
 			name:       "prefixed",
 			archive:    projectDir,
 			composeYml: "compose.yml",
-			options:    []ProjectDirOption[projectDirHandle]{WithPrefix[projectDirHandle]("foo"), initialContentOption},
+			options:    []ProjectDirOption[projectPathHandle]{WithPrefix[projectPathHandle]("foo"), initialContentOption},
 			expected:   os.DirFS("testdata/expected/prefixed"),
 		},
 		{
 			name:       "non-prefixed",
 			archive:    projectDir,
 			composeYml: "compose.yml",
-			options:    []ProjectDirOption[projectDirHandle]{WithTempDir[projectDirHandle](preMadeTempDir), initialContentOption},
+			options:    []ProjectDirOption[projectPathHandle]{WithTempDir[projectPathHandle](preMadeTempDir), initialContentOption},
 			expected:   os.DirFS("testdata/expected/non-prefixed"),
-			checkResult: [](func(tempDir string, composeYml string, handle *projectDirHandle) error){
-				func(tempDir, composeYml string, handle *projectDirHandle) error {
+			checkResult: [](func(tempDir string, composeYml string, handle *projectPathHandle) error){
+				func(tempDir, composeYml string, handle *projectPathHandle) error {
 					if tempDir != preMadeTempDir {
 						return fmt.Errorf("tempDir is not one set with an option, expected = %s, actual = %s", preMadeTempDir, tempDir)
 					}
@@ -69,10 +69,10 @@ func TestPrepare(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.options == nil {
-				tc.options = []ProjectDirOption[projectDirHandle]{}
+				tc.options = []ProjectDirOption[projectPathHandle]{}
 			}
 
-			dir, err := PrepareProjectDir[projectDirHandle](
+			dir, err := PrepareProjectDir[projectPathHandle](
 				tc.archive,
 				tc.composeYml,
 				projectDirSet{
@@ -110,7 +110,7 @@ type projectDirSet struct {
 	RuntimeEnvFiles string
 }
 
-type projectDirHandle struct {
+type projectPathHandle struct {
 	RuntimeEnvFiles afero.Fs
 }
 
@@ -137,7 +137,7 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 			s: dirSet1{
 				Foo: "foo",
 			},
-			h: &dirHandle1{},
+			h: &pathHandle1{},
 		},
 		{
 			name: "2 fields",
@@ -145,14 +145,14 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 				Foo: "./foo",
 				Bar: "./bar",
 			},
-			h: &dirHandle2{},
+			h: &pathHandle2{},
 		},
 		{
 			name: "specifying absolute path",
 			s: dirSet1{
 				Foo: "/foo",
 			},
-			h:   &dirHandle1{},
+			h:   &pathHandle1{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -160,21 +160,21 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 			s: dirSet1{
 				Foo: "../foo",
 			},
-			h:   &dirHandle1{},
+			h:   &pathHandle1{},
 			err: ErrInvalidInput,
 		},
 		{
 			name: "specifying empty path",
 			s:    dirSet1{},
-			h:    &dirHandle1{},
+			h:    &pathHandle1{},
 			err:  ErrInvalidInput,
 		},
 		{
-			name: "dirHandle is not pointer",
+			name: "pathHandle is not pointer",
 			s: dirSet1{
 				Foo: "foo",
 			},
-			h:   dirHandle1{},
+			h:   pathHandle1{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -183,15 +183,15 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 				Foo: "foo",
 				Bar: 12,
 			},
-			h:   &dirHandle1{},
+			h:   &pathHandle1{},
 			err: ErrInvalidInput,
 		},
 		{
-			name: "invalid dirHandle",
+			name: "invalid pathHandle",
 			s: dirSet1{
 				Foo: "foo",
 			},
-			h:   &invalidDirHandle{},
+			h:   &invalidPathHandle{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -199,7 +199,7 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 			s: dirSet1{
 				Foo: "foo",
 			},
-			h:   &dirHandle2{},
+			h:   &pathHandle2{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -208,7 +208,7 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 				Foo: "foo",
 				Bar: "bar",
 			},
-			h:   &dirHandle1{},
+			h:   &pathHandle1{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -217,7 +217,7 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 				Foo: "foo",
 				Bar: "bar",
 			},
-			h:   &dirHandle3{},
+			h:   &pathHandle3{},
 			err: ErrInvalidInput,
 		},
 		{
@@ -226,7 +226,7 @@ func TestPrepare_validPrepareInput(t *testing.T) {
 				Foo: "foo",
 				Baz: "baz",
 			},
-			h:   &dirHandle2{},
+			h:   &pathHandle2{},
 			err: ErrInvalidInput,
 		},
 	} {
@@ -265,21 +265,21 @@ type invalidDirSet struct {
 	Bar int
 }
 
-type dirHandle1 struct {
+type pathHandle1 struct {
 	Foo afero.Fs
 }
 
-type dirHandle2 struct {
+type pathHandle2 struct {
 	Foo afero.Fs
 	Bar afero.Fs
 }
 
-type dirHandle3 struct {
+type pathHandle3 struct {
 	Foo afero.Fs
 	Baz afero.Fs
 }
 
-type invalidDirHandle struct {
+type invalidPathHandle struct {
 	Foo afero.Fs
 	Bar int
 }

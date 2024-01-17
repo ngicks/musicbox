@@ -10,7 +10,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,9 +89,9 @@ func WithSuffix(suffix string) (SafeWriteOptionOption, error) {
 	}, nil
 }
 
-func WithRandomSuffix(randomSuffix bool) SafeWriteOptionOption {
+func WithRandomPattern(randomPattern string) SafeWriteOptionOption {
 	return func(o *SafeWriteOption) {
-		o.randomSuffix = randomSuffix
+		o.randomPattern = randomPattern
 	}
 }
 
@@ -147,22 +146,15 @@ func ValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProcess {
 // Should it use builder pattern?
 
 type SafeWriteOption struct {
-	// If non empty string is set, SafeWrite tries make a directory under fsys root and uses this as temporary file target.
-	// Otherwise SafeWrite writes files under filepath.Dir(name).
-	tmpDirName string
+	tmpFileOption
+
 	// If true and parent directories of dst and tmpDirName are non existent, returns an err immediately.
 	disableMkdir bool
 	// If non zero, SafeWrite uses this perm as an argument for MkdirAll.
 	dirPerm fs.FileMode
 	// If true, SafeWrite perform Chmod after each file creation.
 	forcePerm bool
-	// If non empty string is set, SafeWrite adds the prefix and/or suffix to temporary files.
-	// SafeWrite adds "_" after prefix and before suffix.
-	// Both are not allowed to have an '*'.
-	prefix, suffix string
-	// If true, name is suffixed with a randomly generate string and the opened file guaranteed not to overwrite any existing file.
-	// However this does not prevent generated files from being overwritten, since dst could be name of randomized files.
-	randomSuffix bool
+
 	// If non negative number, SafeWrite performs Chown after each file creation.
 	uid, gid int
 	// validators which would be executed after validators passed to SafeWrite is done successfully.
@@ -171,8 +163,107 @@ type SafeWriteOption struct {
 	disableSync bool
 }
 
+type tmpFileOption struct {
+	// If non empty string is set, SafeWrite tries make a directory under fsys root and uses this as temporary file target.
+	// Otherwise SafeWrite writes files under filepath.Dir(name).
+	tmpDirName string
+	// If non empty string is set, SafeWrite adds the prefix and/or suffix to temporary files.
+	// Both are not allowed to have an '*'.
+	prefix, suffix string
+	// If true, name is suffixed with a randomly generate string and the opened file guaranteed not to overwrite any existing file.
+	// However this does not prevent generated files from being overwritten, since dst could be name of randomized files.
+	randomPattern string
+}
+
+func (o tmpFileOption) tempDir(path string) string {
+	tmpDir := o.tmpDirName
+	if tmpDir == "" {
+		// guaranteed to be non empty string
+		tmpDir = filepath.Dir(path)
+	}
+	tmpDir = filepath.Clean(tmpDir)
+	return tmpDir
+}
+
+func (o tmpFileOption) open(
+	fsys afero.Fs,
+	path string,
+	perm fs.FileMode,
+	openRandom func(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error),
+	openFile func(name string, flag int, perm fs.FileMode) (afero.File, error),
+) (f afero.File, err error) {
+	tmpDir := o.tempDir(path)
+
+	name := filepath.Clean(filepath.Base(path))
+	if isEmpty(name) {
+		return nil, fmt.Errorf("%w", ErrBadInput)
+	}
+
+	suffix := o.suffix
+	if suffix == "" {
+		suffix = ".tmp"
+	}
+
+	var openName string
+	if o.randomPattern != "" {
+		pat := o.randomPattern
+		if !strings.Contains(o.randomPattern, "*") {
+			pat += "*"
+		}
+		openName = o.prefix + name + pat + suffix
+		f, err = openRandom(
+			fsys,
+			tmpDir,
+			openName,
+			perm.Perm(),
+		)
+	} else {
+		openName = o.prefix + name + suffix
+		f, err = openFile(
+			filepath.Join(tmpDir, o.prefix+name+suffix),
+			os.O_CREATE|os.O_RDWR|os.O_EXCL,
+			perm.Perm(),
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: dir = %s, base = %s",
+			ErrBadName, tmpDir, openName,
+		)
+	}
+
+	return f, nil
+}
+
+func (o tmpFileOption) openTmp(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error) {
+	return o.open(fsys, path, perm, OpenFileRandom, fsys.OpenFile)
+}
+
+func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error) {
+	return o.open(
+		fsys,
+		path,
+		perm,
+		MkdirRandom,
+		func(name string, flag int, perm fs.FileMode) (afero.File, error) {
+			err := fsys.Mkdir(name, perm)
+			if err != nil {
+				return nil, err
+			}
+			return fsys.Open(name)
+		},
+	)
+}
+
+func isEmpty(path string) bool {
+	return path == "" || path == "." || path == string(filepath.Separator)
+}
+
 func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	o := &SafeWriteOption{
+		tmpFileOption: tmpFileOption{
+			randomPattern: "-*",
+		},
 		uid: -1,
 		gid: -1,
 	}
@@ -191,69 +282,37 @@ func (o SafeWriteOption) Apply(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	return &o
 }
 
-func (o SafeWriteOption) SafeWrite(
+func (o SafeWriteOption) safeWrite(
 	fsys afero.Fs,
 	dst string,
 	perm fs.FileMode,
-	r io.Reader,
+	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error),
+	copyContent func(dst afero.File) error,
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
 	// always slash.
 	dst = filepath.FromSlash(dst)
 
-	tmpDir := o.tmpDirName
-	if tmpDir == "" {
-		// guaranteed to be non empty string
-		tmpDir = filepath.Dir(dst)
-	}
-
 	if !o.disableMkdir {
-		err = mkdirAll(fsys, tmpDir, o.dirPerm)
+		err = mkdirAll(fsys, o.tempDir(dst), o.dirPerm)
+		// We do not call chmod for dirs since
+		// it can be invoked by the caller anytime if they wish to.
 		if err != nil {
 			return fmt.Errorf("SafeWrite, mkdirAll: %w", err)
 		}
 	}
 
-	name := filepath.Base(dst)
-	if name == "." || name == string(filepath.Separator) {
-		return fmt.Errorf(
-			"SafeWrite, open: %w: dir = %s, base = %s",
-			ErrBadName, filepath.Dir(dst), filepath.Base(dst),
-		)
-	}
-
-	var (
-		tmpName string
-		f       afero.File
-	)
-	if o.randomSuffix || (o.tmpDirName == "" && o.prefix == "" && o.suffix == "") {
-		rand.Uint64()
-		f, err = OpenFileRandom(
-			fsys,
-			tmpDir,
-			strings.Join(slices.DeleteFunc([]string{o.prefix, name, "*", o.suffix}, func(s string) bool { return s == "" }), "_"),
-			200|perm.Perm(), // at least readable for the process.
-		)
-		if err == nil {
-			tmpName = f.Name()
-		}
-	} else {
-		f, err = fsys.OpenFile(
-			filepath.Join(tmpDir, strings.Join([]string{o.prefix, name, "*", o.suffix}, "_")),
-			os.O_CREATE|os.O_TRUNC|os.O_RDWR,
-			perm.Perm(),
-		)
-		if err == nil {
-			tmpName = f.Name()
-		}
-	}
+	f, err := openTmp(fsys, dst, perm)
 	if err != nil {
-		return fmt.Errorf("SafeWrite, open: %w", err)
+		return fmt.Errorf("SafeWrite, %w", err)
 	}
+	tmpName := f.Name()
 
 	var closeErr error
 	closed := false
 	// Multiple calls for Close is documented as undefined.
+	// This will not be called from multiple goroutines simultaneously.
+	// Just simple boolean flag is enough.
 	closeOnce := func() error {
 		if !closed {
 			closed = true
@@ -287,22 +346,19 @@ func (o SafeWriteOption) SafeWrite(
 		}
 	}
 
-	buf := getBuf()
-	defer putBuf(buf)
-
-	_, err = io.CopyBuffer(f, r, *buf)
+	err = copyContent(f)
 	if err != nil {
 		return fmt.Errorf("SafeWrite, copy: %w", err)
 	}
 
 	for _, pp := range postProcesses {
-		err = pp(fsys, tmpDir, f)
+		err = pp(fsys, tmpName, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, validator: %w", err)
 		}
 	}
 	for _, pp := range o.defaultPostProcesses {
-		err = pp(fsys, tmpDir, f)
+		err = pp(fsys, tmpName, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, validator: %w", err)
 		}
@@ -335,6 +391,47 @@ func (o SafeWriteOption) SafeWrite(
 	return nil
 }
 
+func (o SafeWriteOption) SafeWrite(
+	fsys afero.Fs,
+	path string,
+	perm fs.FileMode,
+	r io.Reader,
+	postProcesses ...SafeWritePostProcess,
+) (err error) {
+	return o.safeWrite(
+		fsys,
+		path,
+		perm,
+		o.openTmp,
+		func(dst afero.File) error {
+			b := getBuf()
+			defer putBuf(b)
+			_, err := io.CopyBuffer(dst, r, *b)
+			return err
+		},
+		postProcesses...,
+	)
+}
+
+func (o SafeWriteOption) SafeWriteFs(
+	fsys afero.Fs,
+	dir string,
+	perm fs.FileMode,
+	src fs.FS,
+	postProcesses ...SafeWritePostProcess,
+) error {
+	return o.safeWrite(
+		fsys,
+		dir,
+		perm,
+		o.openTmpDir,
+		func(dst afero.File) error {
+			return CopyFS(afero.NewBasePathFs(fsys, dst.Name()), src)
+		},
+		postProcesses...,
+	)
+}
+
 // mkdirAll calls MkdirAll on fsys.
 // If dir is an invalid value ("" || "." || filepath.Separator),
 func mkdirAll(fsys afero.Fs, dir string, perm fs.FileMode) error {
@@ -360,8 +457,42 @@ func emptyDir(dir string) bool {
 }
 
 func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error) {
+	return openRandom(
+		fsys,
+		dir,
+		pattern,
+		perm,
+		func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error) {
+			return fsys.OpenFile(name, flag, perm)
+		},
+	)
+}
+
+func MkdirRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error) {
+	return openRandom(
+		fsys,
+		dir,
+		pattern,
+		perm,
+		func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error) {
+			err := fsys.Mkdir(name, perm)
+			if err != nil {
+				return nil, err
+			}
+			return fsys.Open(name)
+		},
+	)
+}
+
+func openRandom(
+	fsys afero.Fs,
+	dir string,
+	pattern string,
+	perm fs.FileMode,
+	open func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error),
+) (afero.File, error) {
 	if dir == "" {
-		dir = os.TempDir()
+		dir = "tmp"
 	}
 
 	if strings.Contains(pattern, string(filepath.Separator)) {
@@ -379,7 +510,7 @@ func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode)
 	for {
 		random := strconv.FormatUint(rand.Uint64(), 10)
 		name := filepath.Join(dir, prefix+random+suffix)
-		f, err := fsys.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 600|perm.Perm())
+		f, err := open(fsys, name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm.Perm())
 		if err == nil {
 			return f, nil
 		}
