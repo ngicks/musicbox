@@ -13,6 +13,10 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+func init() {
+	_ = os.Chmod("testdata/fs6/random1.txt", 0o777)
+}
+
 var (
 	//go:embed testdata/random1.txt
 	random1 []byte
