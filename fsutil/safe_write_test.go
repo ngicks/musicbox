@@ -14,6 +14,10 @@ import (
 	"gotest.tools/v3/assert/cmp"
 )
 
+func ignoreHiddenFile(fsys fs.FS) fs.FS {
+	return afero.NewIOFS(afero.NewRegexpFs(afero.FromIOFS{FS: fsys}, regexp.MustCompile(`(?:^|\/)[^.].*`)))
+}
+
 func TestSafeWrite(t *testing.T) {
 	type testCase struct {
 		name               string
@@ -57,7 +61,7 @@ func TestSafeWrite(t *testing.T) {
 			},
 			assertResult: []assertAfter{
 				assertNilErr(),
-				assertFsUnder("foo/bar/baz", os.DirFS("testdata/fs6")),
+				assertFsUnder("foo/bar/baz", ignoreHiddenFile(os.DirFS("testdata/fs6"))),
 			},
 		},
 		{
@@ -169,7 +173,7 @@ func TestSafeWrite(t *testing.T) {
 					baseFsys,
 					tc.dst,
 					tc.perm,
-					tc.fsys,
+					ignoreHiddenFile(tc.fsys),
 					append(tc.pp, assertBeforeRename)...,
 				)
 			} else {
@@ -182,10 +186,10 @@ func TestSafeWrite(t *testing.T) {
 				)
 			}
 
+			assert.NilError(t, err)
 			if tc.assertBeforeRename != nil && !assertCalled {
 				t.Fatalf("assertBeforeRename is defined but was not called")
 			}
-			assert.NilError(t, err)
 
 			err = fs.WalkDir(afero.NewIOFS(baseFsys), ".", func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
@@ -236,12 +240,14 @@ type assertBefore func(t *testing.T, fsys afero.Fs, seenPaths []string)
 
 func assertLen(l int) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
+		t.Helper()
 		assert.Assert(t, cmp.Len(seenPaths, l))
 	}
 }
 
 func assertPathContains(pat string) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
+		t.Helper()
 		reg := regexp.MustCompile(pat)
 		for _, p := range seenPaths {
 			if reg.MatchString(p) {
@@ -254,6 +260,7 @@ func assertPathContains(pat string) assertBefore {
 
 func assertPathPattern(pat string) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
+		t.Helper()
 		for _, p := range seenPaths {
 			assert.Assert(t, cmp.Regexp(pat, p))
 		}
@@ -262,6 +269,7 @@ func assertPathPattern(pat string) assertBefore {
 
 func assertPerm(path string, mode fs.FileMode) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
+		t.Helper()
 		s, err := fsys.Stat(path)
 		assert.NilError(t, err)
 		assert.Assert(t, cmp.Equal(s.Mode(), mode))
@@ -272,6 +280,7 @@ type assertAfter func(t *testing.T, fsys afero.Fs, err error)
 
 func assertNilErr() assertAfter {
 	return func(t *testing.T, fsys afero.Fs, err error) {
+		t.Helper()
 		assert.NilError(t, err)
 	}
 }
@@ -283,6 +292,7 @@ type namedContent struct {
 
 func assertContents(namedContents []namedContent) assertAfter {
 	return func(t *testing.T, fsys afero.Fs, err error) {
+		t.Helper()
 		for _, nc := range namedContents {
 			f, err := fsys.Open(nc.path)
 			assert.NilError(t, err)
@@ -297,6 +307,7 @@ func assertContents(namedContents []namedContent) assertAfter {
 
 func assertFsUnder(base string, fsys fs.FS) assertAfter {
 	return func(t *testing.T, fsys_ afero.Fs, _ error) {
+		t.Helper()
 		eq, err := Equal(fsys, afero.NewIOFS(afero.NewBasePathFs(fsys_, base)))
 		assert.NilError(t, err)
 		assert.Assert(t, eq)
@@ -305,6 +316,7 @@ func assertFsUnder(base string, fsys fs.FS) assertAfter {
 
 func assertModeAfter(path string, mode fs.FileMode) assertAfter {
 	return func(t *testing.T, fsys afero.Fs, _ error) {
+		t.Helper()
 		s, err := fsys.Stat(path)
 		assert.NilError(t, err)
 		assert.Assert(t, cmp.Equal(s.Mode(), mode))

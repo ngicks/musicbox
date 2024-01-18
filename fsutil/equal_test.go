@@ -140,7 +140,10 @@ func TestEqual(t *testing.T) {
 		},
 	} {
 		t.Run(p.name, func(t *testing.T) {
-			eq, err := Equal(p.l, p.r)
+			eq, err := Equal(
+				ignoreHiddenFile(p.r),
+				ignoreHiddenFile(p.l),
+			)
 			assert.NilError(t, err)
 			assert.Assert(t, !eq)
 		})
