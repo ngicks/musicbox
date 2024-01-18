@@ -124,12 +124,12 @@ func TestSafeWrite(t *testing.T) {
 			assertBeforeRename: []assertBefore{
 				assertLen(2), // 2 files
 				assertPathContains(`^tmp\/foo`),
-				assertPerm("tmp/foo", fs.ModeDir|0410),
+				assertPerm("tmp/foo", fs.ModeDir|0710),
 			},
 			assertResult: []assertAfter{
 				assertNilErr(),
 				assertFsUnder("foo", os.DirFS("testdata/fs4")),
-				assertModeAfter("foo", fs.ModeDir|0410),
+				assertModeAfter("foo", fs.ModeDir|0710),
 			},
 		},
 	} {

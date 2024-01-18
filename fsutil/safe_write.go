@@ -286,7 +286,7 @@ func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) 
 		perm,
 		MkdirRandom,
 		func(name string, flag int, perm fs.FileMode) (afero.File, error) {
-			err := fsys.Mkdir(name, perm)
+			err := fsys.Mkdir(name, perm|0o300) // writable and executable, since we are creating files under.
 			if err != nil {
 				return nil, err
 			}
@@ -349,7 +349,7 @@ func (o SafeWriteOption) safeWrite(
 		}
 	}
 
-	f, err := openTmp(fsys, dst, perm.Perm()|0200) // At least writable since safeWrite does the user-space copy.)
+	f, err := openTmp(fsys, dst, perm.Perm())
 	if err != nil {
 		return fmt.Errorf("SafeWrite, %w", err)
 	}
@@ -381,7 +381,7 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	if o.forcePerm {
-		err = fsys.Chmod(tmpName, perm.Perm())
+		err = fsys.Chmod(tmpName, perm.Perm()|0o300)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, chmod: %w", err)
 		}
@@ -510,7 +510,7 @@ func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode)
 		pattern,
 		perm,
 		func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error) {
-			return fsys.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
+			return fsys.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm|0o200) // at least writable
 		},
 	)
 }
