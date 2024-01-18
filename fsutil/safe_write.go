@@ -71,20 +71,17 @@ func validNonPattern(s string, cat string) error {
 	return nil
 }
 
-func WithPrefix(prefix string) (SafeWriteOptionOption, error) {
-	if err := validNonPattern(prefix, "prefix"); err != nil {
-		return nil, fmt.Errorf("WithPrefix: %w", err)
+func WithPrefixSuffix(prefix, suffix string) (SafeWriteOptionOption, error) {
+	errPre := validNonPattern(prefix, "prefix")
+	errSuf := validNonPattern(suffix, "suffix")
+	if errPre != nil || errSuf != nil {
+		return nil, fmt.Errorf("WithPrefixSuffix: prefix err = %w, suffix err = %w", errPre, errSuf)
 	}
+
+	// TODO: warn if `prefix == "" && suffix == ""` ?
+
 	return func(o *SafeWriteOption) {
 		o.prefix = prefix
-	}, nil
-}
-
-func WithSuffix(suffix string) (SafeWriteOptionOption, error) {
-	if err := validNonPattern(suffix, "suffix"); err != nil {
-		return nil, fmt.Errorf("WithPrefix: %w", err)
-	}
-	return func(o *SafeWriteOption) {
 		o.suffix = suffix
 	}, nil
 }
@@ -185,6 +182,54 @@ func (o tmpFileOption) tempDir(path string) string {
 	return tmpDir
 }
 
+func (o tmpFileOption) suffixOrDefault() string {
+	if o.suffix != "" {
+		return o.suffix
+	}
+
+	tmpDir := filepath.Clean(o.tmpDirName)
+	if isEmpty(tmpDir) {
+		return ".tmp"
+	}
+	return ""
+}
+
+func (o tmpFileOption) matchTmpFile(path string) bool {
+	tmpDir := filepath.Clean(o.tmpDirName)
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	if !isEmpty(tmpDir) && dir != tmpDir {
+		return false
+	}
+	return strings.HasPrefix(base, o.prefix) && strings.HasSuffix(base, o.suffixOrDefault())
+}
+
+func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
+	root := "."
+	tmpDir := filepath.Clean(o.tmpDirName)
+	if !isEmpty(tmpDir) {
+		root = tmpDir
+	}
+
+	return fs.WalkDir(afero.NewIOFS(fsys), root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				// tmp dir does not exist.
+				return nil
+			}
+			return err
+		}
+		if path == root {
+			return nil
+		}
+
+		if o.matchTmpFile(path) {
+			return fsys.RemoveAll(path)
+		}
+		return nil
+	})
+}
+
 func (o tmpFileOption) open(
 	fsys afero.Fs,
 	path string,
@@ -199,18 +244,13 @@ func (o tmpFileOption) open(
 		return nil, fmt.Errorf("%w", ErrBadInput)
 	}
 
-	suffix := o.suffix
-	if suffix == "" {
-		suffix = ".tmp"
-	}
-
 	var openName string
 	if o.randomPattern != "" {
 		pat := o.randomPattern
 		if !strings.Contains(o.randomPattern, "*") {
 			pat += "*"
 		}
-		openName = o.prefix + name + pat + suffix
+		openName = o.prefix + name + pat + o.suffixOrDefault()
 		f, err = openRandom(
 			fsys,
 			tmpDir,
@@ -218,9 +258,9 @@ func (o tmpFileOption) open(
 			perm.Perm(),
 		)
 	} else {
-		openName = o.prefix + name + suffix
+		openName = o.prefix + name + o.suffixOrDefault()
 		f, err = openFile(
-			filepath.Join(tmpDir, o.prefix+name+suffix),
+			filepath.Join(tmpDir, openName),
 			os.O_CREATE|os.O_RDWR|os.O_EXCL,
 			perm.Perm(),
 		)
@@ -282,12 +322,19 @@ func (o SafeWriteOption) Apply(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	return &o
 }
 
+func (o SafeWriteOption) CleanTmp(fsys afero.Fs) error {
+	if err := o.tmpFileOption.cleanTmp(fsys); err != nil {
+		return fmt.Errorf("CleanTmp: %w", err)
+	}
+	return nil
+}
+
 func (o SafeWriteOption) safeWrite(
 	fsys afero.Fs,
 	dst string,
 	perm fs.FileMode,
 	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error),
-	copyContent func(dst afero.File) error,
+	copyTo func(dst afero.File) error,
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
 	// always slash.
@@ -302,7 +349,7 @@ func (o SafeWriteOption) safeWrite(
 		}
 	}
 
-	f, err := openTmp(fsys, dst, perm)
+	f, err := openTmp(fsys, dst, perm.Perm()|0200) // At least writable since safeWrite does the user-space copy.)
 	if err != nil {
 		return fmt.Errorf("SafeWrite, %w", err)
 	}
@@ -311,8 +358,8 @@ func (o SafeWriteOption) safeWrite(
 	var closeErr error
 	closed := false
 	// Multiple calls for Close is documented as undefined.
-	// This will not be called from multiple goroutines simultaneously.
-	// Just simple boolean flag is enough.
+	// Just simple boolean flag is enough since
+	// the calling goroutine is only the current g.
 	closeOnce := func() error {
 		if !closed {
 			closed = true
@@ -327,6 +374,11 @@ func (o SafeWriteOption) safeWrite(
 			_ = fsys.Remove(tmpName)
 		}
 	}()
+
+	err = copyTo(f)
+	if err != nil {
+		return fmt.Errorf("SafeWrite, copy: %w", err)
+	}
 
 	if o.forcePerm {
 		err = fsys.Chmod(tmpName, perm.Perm())
@@ -344,11 +396,6 @@ func (o SafeWriteOption) safeWrite(
 		if err != nil {
 			return fmt.Errorf("SafeWrite, chown: %w", err)
 		}
-	}
-
-	err = copyContent(f)
-	if err != nil {
-		return fmt.Errorf("SafeWrite, copy: %w", err)
 	}
 
 	for _, pp := range postProcesses {
@@ -402,7 +449,7 @@ func (o SafeWriteOption) SafeWrite(
 		fsys,
 		path,
 		perm,
-		o.openTmp,
+		o.tmpFileOption.openTmp,
 		func(dst afero.File) error {
 			b := getBuf()
 			defer putBuf(b)
@@ -462,8 +509,8 @@ func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode)
 		dir,
 		pattern,
 		perm,
-		func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error) {
-			return fsys.OpenFile(name, flag, perm)
+		func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error) {
+			return fsys.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
 		},
 	)
 }
@@ -474,7 +521,7 @@ func MkdirRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (a
 		dir,
 		pattern,
 		perm,
-		func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error) {
+		func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error) {
 			err := fsys.Mkdir(name, perm)
 			if err != nil {
 				return nil, err
@@ -489,7 +536,7 @@ func openRandom(
 	dir string,
 	pattern string,
 	perm fs.FileMode,
-	open func(fsys afero.Fs, name string, flag int, perm fs.FileMode) (afero.File, error),
+	open func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error),
 ) (afero.File, error) {
 	if dir == "" {
 		dir = "tmp"
@@ -508,9 +555,9 @@ func openRandom(
 
 	attempt := 0
 	for {
-		random := strconv.FormatUint(rand.Uint64(), 10)
+		random := randomUint32Padded()
 		name := filepath.Join(dir, prefix+random+suffix)
-		f, err := open(fsys, name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm.Perm())
+		f, err := open(fsys, name, perm.Perm())
 		if err == nil {
 			return f, nil
 		}
@@ -528,4 +575,16 @@ func openRandom(
 			return nil, err
 		}
 	}
+}
+
+func randomUint32Padded() string {
+	s := strconv.FormatUint(uint64(rand.Uint32()), 10)
+	var builder strings.Builder
+	builder.Grow(len("4294967295"))
+	r := len("4294967295") - len(s)
+	for i := 0; i < r; i++ {
+		builder.WriteByte('0')
+	}
+	builder.WriteString(s)
+	return builder.String()
 }
