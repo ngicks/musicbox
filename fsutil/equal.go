@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 )
 
 var fakeErr = errors.New("fake")
@@ -53,6 +54,9 @@ func Equal(l, r fs.FS) (bool, error) {
 
 			rf, err = r.Open(path)
 			if err != nil {
+				if os.IsNotExist(err) {
+					return fakeErr
+				}
 				return err
 			}
 			defer func() { _ = rf.Close() }()
@@ -79,7 +83,7 @@ func Equal(l, r fs.FS) (bool, error) {
 			}
 
 			if len(lDirents) != len(rDirents) {
-				return fmt.Errorf("content mismatch, dir = %s", path)
+				return fakeErr
 			}
 		} else {
 			equal, err = sameFile(lf, rf)
