@@ -140,8 +140,8 @@ func TestEqual(t *testing.T) {
 		},
 	} {
 		t.Run(p.name, func(t *testing.T) {
-			eq, _ := Equal(p.l, p.r)
-			// assert.NilError(t, err)
+			eq, err := Equal(p.l, p.r)
+			assert.NilError(t, err)
 			assert.Assert(t, !eq)
 		})
 	}
