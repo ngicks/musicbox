@@ -25,6 +25,10 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 			return err
 		}
 
+		if path == "." {
+			return nil
+		}
+
 		target := filepath.FromSlash(path)
 
 		ss, err := d.Info()
@@ -34,12 +38,6 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 
 		chmod := func() error {
 			err = dst.Chmod(target, ss.Mode().Perm())
-			if path == "." && os.IsNotExist(err) {
-				// Some implementation refuses to create root dir(".").
-				// In that case Chmod returns ErrNotExist.
-				// Just ignore it.
-				err = nil
-			}
 			if err != nil {
 				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", target, err)
 			}
