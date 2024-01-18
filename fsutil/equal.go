@@ -120,6 +120,10 @@ func sameFile(r, l fs.File) (bool, error) {
 	rSize := rs.Size()
 	lSize := ls.Size()
 
+	return sameReader(l, r, lSize, rSize)
+}
+
+func sameReader(l, r io.Reader, lSize, rSize int64) (same bool, err error) {
 	if rSize != lSize {
 		return false, nil
 	}
