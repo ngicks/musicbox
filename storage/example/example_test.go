@@ -12,13 +12,13 @@ import (
 
 func TestExample(t *testing.T) {
 	var (
-		set = DirSet{
+		set = PathSet{
 			Foo: "./Foo",
 			Bar: "./Bar",
 			Baz: "./Baz",
 		}
-		handle  pathHandle
-		content DirContents = DirContents{
+		handle  PathHandle
+		content PathContents = PathContents{
 			Foo: os.DirFS("testdata/foo"),
 			Baz: os.DirFS("testdata/baz"),
 		}
@@ -29,7 +29,7 @@ func TestExample(t *testing.T) {
 
 	base := afero.NewMemMapFs()
 
-	handle, err := PrepareDir(base, set, content)
+	handle, err := PreparePath(base, set, content)
 	assert.NilError(t, err)
 
 	assertSeenPaths(t, handle.Foo, map[string]struct{}{"a": {}})

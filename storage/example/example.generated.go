@@ -9,27 +9,27 @@ import (
 	"github.com/spf13/afero"
 )
 
-func PrepareDir(
+func PreparePath(
 	base afero.Fs,
-	pathSet DirSet,
-	initialContents DirContents,
-) (pathHandle, error) {
-	return storage.PrepareHandle[DirSet, pathHandle](base, pathSet, initialContents)
+	pathSet PathSet,
+	initialContents PathContents,
+) (PathHandle, error) {
+	return storage.PrepareHandle[PathSet, PathHandle](base, pathSet, initialContents)
 }
 
-type DirSet struct {
+type PathSet struct {
 	Foo string
 	Bar string
 	Baz string
 }
 
-type pathHandle struct {
+type PathHandle struct {
 	Foo afero.Fs
 	Bar afero.Fs
 	Baz afero.Fs
 }
 
-type DirContents struct {
+type PathContents struct {
 	Foo fs.FS
 	Bar fs.FS
 	Baz fs.FS
