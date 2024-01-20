@@ -11,7 +11,6 @@ import (
 
 	"github.com/compose-spec/compose-go/loader"
 	"github.com/compose-spec/compose-go/types"
-	"github.com/ngicks/musicbox/storage"
 )
 
 type Loader struct {
@@ -19,7 +18,7 @@ type Loader struct {
 	Options [](func(*loader.Options))
 }
 
-func FromDir[T any](d *storage.ProjectDir[T], options []func(*loader.Options)) (*Loader, error) {
+func FromDir[T any](d *ProjectDir[T], options []func(*loader.Options)) (*Loader, error) {
 	config, err := ConfigFromPath(d.ComposeYmlPath())
 	if err != nil {
 		return nil, err

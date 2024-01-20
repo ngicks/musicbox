@@ -1,122 +1,14 @@
 package storage
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"reflect"
 	"testing"
 
-	"github.com/ngicks/musicbox/fsutil"
 	"github.com/spf13/afero"
 	"gotest.tools/v3/assert"
 )
-
-var (
-	//go:embed testdata/project/compose.yml
-	composeYmlBin []byte
-)
-
-func TestPrepare(t *testing.T) {
-	type testCase struct {
-		name        string
-		archive     fs.FS
-		composeYml  string
-		options     []ProjectDirOption[projectPathHandle]
-		expected    fs.FS
-		checkResult []func(tempDir, composeYml string, handle *projectPathHandle) error
-	}
-
-	projectDir := os.DirFS("testdata/project")
-
-	preMadeTempDir, err := os.MkdirTemp("", "composeloader-test-*")
-	if err != nil {
-		panic(err)
-	}
-
-	content := projectContent{RuntimeEnvFiles: os.DirFS("testdata/runtime_env")}
-	initialContentOption, err := WithInitialContent[projectPathHandle](content)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, tc := range []testCase{
-		{
-			name:       "prefixed",
-			archive:    projectDir,
-			composeYml: "compose.yml",
-			options:    []ProjectDirOption[projectPathHandle]{WithPrefix[projectPathHandle]("foo"), initialContentOption},
-			expected:   os.DirFS("testdata/expected/prefixed"),
-		},
-		{
-			name:       "non-prefixed",
-			archive:    projectDir,
-			composeYml: "compose.yml",
-			options:    []ProjectDirOption[projectPathHandle]{WithTempDir[projectPathHandle](preMadeTempDir), initialContentOption},
-			expected:   os.DirFS("testdata/expected/non-prefixed"),
-			checkResult: [](func(tempDir string, composeYml string, handle *projectPathHandle) error){
-				func(tempDir, composeYml string, handle *projectPathHandle) error {
-					if tempDir != preMadeTempDir {
-						return fmt.Errorf("tempDir is not one set with an option, expected = %s, actual = %s", preMadeTempDir, tempDir)
-					}
-					return nil
-				},
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.options == nil {
-				tc.options = []ProjectDirOption[projectPathHandle]{}
-			}
-
-			dir, err := PrepareProjectDir[projectPathHandle](
-				tc.archive,
-				tc.composeYml,
-				projectDirSet{
-					RuntimeEnvFiles: "runtime_env",
-				},
-				tc.options...,
-			)
-			assert.NilError(t, err)
-
-			defer func() {
-				err := os.RemoveAll(dir.Dir())
-				if err != nil {
-					t.Logf("tempDir removal failed = %#v", err)
-				}
-			}()
-
-			bin, err := os.ReadFile(dir.ComposeYmlPath())
-			assert.NilError(t, err)
-			assert.Assert(t, bytes.Equal(composeYmlBin, bin))
-
-			eq, err := fsutil.Equal(os.DirFS(dir.Dir()), tc.expected)
-			assert.NilError(t, err)
-			assert.Assert(t, eq)
-
-			if tc.checkResult != nil {
-				for _, checker := range tc.checkResult {
-					assert.NilError(t, checker(dir.Dir(), dir.ComposeYmlPath(), dir.Handle()))
-				}
-			}
-		})
-	}
-}
-
-type projectDirSet struct {
-	RuntimeEnvFiles string
-}
-
-type projectPathHandle struct {
-	RuntimeEnvFiles afero.Fs
-}
-
-type projectContent struct {
-	RuntimeEnvFiles fs.FS
-}
 
 func TestPrepare_validPrepareInput(t *testing.T) {
 	type testCase struct {
