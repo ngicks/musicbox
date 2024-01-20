@@ -60,6 +60,12 @@ func WithDisableRemoveOnErr(disableRemoveOnErr bool) SafeWriteOptionOption {
 	}
 }
 
+func WithIgnoreMatchedErr(ignoreMatchedErr func(err error) bool) SafeWriteOptionOption {
+	return func(o *SafeWriteOption) {
+		o.ignoreMatchedErr = ignoreMatchedErr
+	}
+}
+
 func validNonPattern(s string, cat string) error {
 	if strings.Contains(s, "*") {
 		return fmt.Errorf("%w: %s contains '*'", ErrBadPattern, cat)
@@ -151,6 +157,8 @@ type SafeWriteOption struct {
 	forcePerm bool
 	// If true, SafeWrite will not try to delete temporary files on an occurrence of an error.
 	disableRemoveOnErr bool
+	// If ignoreMatchedErr is non nil and returns true, skip temp file removal.
+	ignoreMatchedErr func(err error) bool
 
 	// If non negative number, SafeWrite performs Chown after each file creation.
 	uid, gid int
@@ -370,9 +378,16 @@ func (o SafeWriteOption) safeWrite(
 
 	defer func() {
 		_ = closeOnce()
-		if err != nil && !o.disableRemoveOnErr {
-			_ = fsys.Remove(tmpName)
+		if err == nil {
+			return
 		}
+		if o.ignoreMatchedErr != nil && o.ignoreMatchedErr(err) {
+			return
+		}
+		if o.disableRemoveOnErr {
+			return
+		}
+		_ = fsys.Remove(tmpName)
 	}()
 
 	err = copyTo(f)
