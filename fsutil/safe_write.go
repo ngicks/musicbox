@@ -105,6 +105,14 @@ func WithOwner(uid, gid int) SafeWriteOptionOption {
 	}
 }
 
+func WithDefaultPreProcesses(defaultPreProcess []SafeWritePreProcess) SafeWriteOptionOption {
+	copied := make([]SafeWritePreProcess, len(defaultPreProcess))
+	copy(copied, defaultPreProcess)
+	return func(o *SafeWriteOption) {
+		o.defaultPreProcess = copied
+	}
+}
+
 func WithDefaultPostProcesses(defaultPostProcesses []SafeWritePostProcess) SafeWriteOptionOption {
 	copied := make([]SafeWritePostProcess, len(defaultPostProcesses))
 	copy(copied, defaultPostProcesses)
@@ -117,6 +125,20 @@ func WithDisableSync(disableSync bool) SafeWriteOptionOption {
 	return func(o *SafeWriteOption) {
 		o.disableSync = disableSync
 	}
+}
+type SafeWritePreProcess func(fsys afero.Fs, name string, file afero.File) error
+
+// PreProcessSeek seeks given files to offset from whence.
+func PreProcessSeek(offset int64, whence int) SafeWritePreProcess {
+	return func(fsys afero.Fs, name string, file afero.File) error {
+		_, err := file.Seek(offset, whence)
+		return err
+	}
+}
+
+// PreProcessSeekEnd seeks given files to send of the file.
+func PreProcessSeekEnd() SafeWritePreProcess {
+	return PreProcessSeek(0, io.SeekEnd)
 }
 
 type SafeWritePostProcess func(fsys afero.Fs, name string, file afero.File) error
@@ -161,7 +183,8 @@ type SafeWriteOption struct {
 	ignoreMatchedErr func(err error) bool
 
 	// If non negative number, SafeWrite performs Chown after each file creation.
-	uid, gid int
+	uid, gid          int
+	defaultPreProcess []SafeWritePreProcess
 	// validators which would be executed after validators passed to SafeWrite is done successfully.
 	defaultPostProcesses []SafeWritePostProcess
 	// If true, SafeWrite does not perform sync
@@ -269,7 +292,7 @@ func (o tmpFileOption) open(
 		openName = o.prefix + name + o.suffixOrDefault()
 		f, err = openFile(
 			filepath.Join(tmpDir, openName),
-			os.O_CREATE|os.O_RDWR|os.O_EXCL,
+			os.O_CREATE|os.O_RDWR,
 			perm.Perm(),
 		)
 	}
@@ -390,6 +413,13 @@ func (o SafeWriteOption) safeWrite(
 		_ = fsys.Remove(tmpName)
 	}()
 
+	for _, pp := range o.defaultPreProcess {
+		err = pp(fsys, tmpName, f)
+		if err != nil {
+			return fmt.Errorf("SafeWrite, preprocess: %w", err)
+		}
+	}
+
 	err = copyTo(f)
 	if err != nil {
 		return fmt.Errorf("SafeWrite, copy: %w", err)
@@ -416,13 +446,13 @@ func (o SafeWriteOption) safeWrite(
 	for _, pp := range postProcesses {
 		err = pp(fsys, tmpName, f)
 		if err != nil {
-			return fmt.Errorf("SafeWrite, validator: %w", err)
+			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
 	}
 	for _, pp := range o.defaultPostProcesses {
 		err = pp(fsys, tmpName, f)
 		if err != nil {
-			return fmt.Errorf("SafeWrite, validator: %w", err)
+			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
 	}
 
