@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,7 +39,7 @@ type SafeWriteOptionOption func(o *SafeWriteOption)
 
 func WithTmpDir(tmpDirName string) SafeWriteOptionOption {
 	return func(o *SafeWriteOption) {
-		o.tmpDirName = tmpDirName
+		o.tmpDirName = filepath.FromSlash(tmpDirName)
 	}
 }
 
@@ -72,7 +73,7 @@ func validNonPattern(s string, cat string) error {
 	}
 	if strings.ContainsFunc(s, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
 		// always slash.
-		return fmt.Errorf("%w: %s contains path separator '"+string(filepath.Separator)+"'", ErrBadPattern, cat)
+		return fmt.Errorf("%w: %s contains path separator '"+string(filepath.Separator)+"'", ErrBadName, cat)
 	}
 	return nil
 }
@@ -92,10 +93,13 @@ func WithPrefixSuffix(prefix, suffix string) (SafeWriteOptionOption, error) {
 	}, nil
 }
 
-func WithRandomPattern(randomPattern string) SafeWriteOptionOption {
+func WithRandomPattern(randomPattern string) (SafeWriteOptionOption, error) {
+	if strings.ContainsFunc(randomPattern, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
+		return nil, fmt.Errorf("%w: %s contains path separator '"+string(filepath.Separator)+"'", ErrBadName, randomPattern)
+	}
 	return func(o *SafeWriteOption) {
 		o.randomPattern = randomPattern
-	}
+	}, nil
 }
 
 func WithOwner(uid, gid int) SafeWriteOptionOption {
@@ -126,6 +130,16 @@ func WithDisableSync(disableSync bool) SafeWriteOptionOption {
 		o.disableSync = disableSync
 	}
 }
+
+func ApplyMatching[T ~(func(fsys afero.Fs, name string, file afero.File) error)](pattern *regexp.Regexp, opt T) T {
+	return func(fsys afero.Fs, name string, file afero.File) error {
+		if pattern.MatchString(name) {
+			return opt(fsys, name, file)
+		}
+		return nil
+	}
+}
+
 type SafeWritePreProcess func(fsys afero.Fs, name string, file afero.File) error
 
 // PreProcessSeek seeks given files to offset from whence.
@@ -136,27 +150,43 @@ func PreProcessSeek(offset int64, whence int) SafeWritePreProcess {
 	}
 }
 
-// PreProcessSeekEnd seeks given files to send of the file.
+// PreProcessSeekEnd seeks given files to the end of files.
 func PreProcessSeekEnd() SafeWritePreProcess {
 	return PreProcessSeek(0, io.SeekEnd)
 }
 
+func PreProcessAssertSizeZero() SafeWritePreProcess {
+	return func(fsys afero.Fs, name string, file afero.File) error {
+		s, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if s.Size() != 0 {
+			return fmt.Errorf("%w: expected the file to be empty but has %d bytes, name = %s", ErrBadInput, s.Size(), name)
+		}
+		return nil
+	}
+}
+
 type SafeWritePostProcess func(fsys afero.Fs, name string, file afero.File) error
 
-func ValidateClose(r io.Closer) SafeWritePostProcess {
+func PostProcessClose(r io.Closer) SafeWritePostProcess {
 	return func(fsys afero.Fs, name string, file afero.File) error {
 		return r.Close()
 	}
 }
 
+// TeeHasher creates a reader reading from r and tee-ing data to h.
+// validator can be passed to SafeWrite to so that it can prevent corrupted files from appearing final destination.
+// validator returns ErrHashSumMismatch on mismatching hashes.
 func TeeHasher(r io.Reader, h hash.Hash, expected []byte) (piped io.Reader, validator SafeWritePostProcess) {
 	piped = io.TeeReader(r, h)
-	validator = ValidateCheckSum(h, expected)
+	validator = PostProcessValidateCheckSum(h, expected)
 	return
 }
 
-func ValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProcess {
-	return func(fsys afero.Fs, name string, file afero.File) error {
+func PostProcessValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProcess {
+	return func(_ afero.Fs, _ string, _ afero.File) error {
 		actual := h.Sum(nil)
 		if bytes.Equal(expected, actual) {
 			return nil
@@ -191,6 +221,29 @@ type SafeWriteOption struct {
 	disableSync bool
 }
 
+func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
+	o := &SafeWriteOption{
+		tmpFileOption: tmpFileOption{
+			randomPattern: "-*",
+		},
+		uid: -1,
+		gid: -1,
+	}
+
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return o
+}
+
+func (o SafeWriteOption) Apply(opts ...SafeWriteOptionOption) *SafeWriteOption {
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return &o
+}
+
 type tmpFileOption struct {
 	// If non empty string is set, SafeWrite tries make a directory under fsys root and uses this as temporary file target.
 	// Otherwise SafeWrite writes files under filepath.Dir(name).
@@ -198,19 +251,19 @@ type tmpFileOption struct {
 	// If non empty string is set, SafeWrite adds the prefix and/or suffix to temporary files.
 	// Both are not allowed to have an '*'.
 	prefix, suffix string
-	// If true, name is suffixed with a randomly generate string and the opened file guaranteed not to overwrite any existing file.
-	// However this does not prevent generated files from being overwritten, since dst could be name of randomized files.
+	// If non empty string, tmp files are created random string added in between name and suffix.
+	// The Last '*' in randomPattern will be replaced with randomly generated string.
+	// If it does not have a single '*', one is appended to the pattern.
 	randomPattern string
 }
 
 func (o tmpFileOption) tempDir(path string) string {
-	tmpDir := o.tmpDirName
-	if tmpDir == "" {
+	tmpDir := filepath.Clean(o.tmpDirName)
+	if isEmpty(tmpDir) {
 		// guaranteed to be non empty string
 		tmpDir = filepath.Dir(path)
 	}
-	tmpDir = filepath.Clean(tmpDir)
-	return tmpDir
+	return normalizePath(tmpDir)
 }
 
 func (o tmpFileOption) suffixOrDefault() string {
@@ -244,9 +297,9 @@ func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 
 	return fs.WalkDir(afero.NewIOFS(fsys), root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) && path == root {
 				// tmp dir does not exist.
-				return nil
+				return fs.SkipAll
 			}
 			return err
 		}
@@ -272,13 +325,13 @@ func (o tmpFileOption) open(
 
 	name := filepath.Clean(filepath.Base(path))
 	if isEmpty(name) {
-		return nil, fmt.Errorf("%w", ErrBadInput)
+		return nil, fmt.Errorf("%w", ErrBadName)
 	}
 
 	var openName string
 	if o.randomPattern != "" {
 		pat := o.randomPattern
-		if !strings.Contains(o.randomPattern, "*") {
+		if !strings.Contains(pat, "*") {
 			pat += "*"
 		}
 		openName = o.prefix + name + pat + o.suffixOrDefault()
@@ -298,8 +351,8 @@ func (o tmpFileOption) open(
 	}
 	if err != nil {
 		return nil, fmt.Errorf(
-			"%w: dir = %s, base = %s",
-			ErrBadName, tmpDir, openName,
+			"dir = %s, base = %s, %w",
+			tmpDir, openName, err,
 		)
 	}
 
@@ -330,29 +383,6 @@ func isEmpty(path string) bool {
 	return path == "" || path == "." || path == string(filepath.Separator)
 }
 
-func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
-	o := &SafeWriteOption{
-		tmpFileOption: tmpFileOption{
-			randomPattern: "-*",
-		},
-		uid: -1,
-		gid: -1,
-	}
-
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	return o
-}
-
-func (o SafeWriteOption) Apply(opts ...SafeWriteOptionOption) *SafeWriteOption {
-	for _, opt := range opts {
-		opt(&o)
-	}
-	return &o
-}
-
 func (o SafeWriteOption) CleanTmp(fsys afero.Fs) error {
 	if err := o.tmpFileOption.cleanTmp(fsys); err != nil {
 		return fmt.Errorf("CleanTmp: %w", err)
@@ -369,7 +399,7 @@ func (o SafeWriteOption) safeWrite(
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
 	// always slash.
-	dst = filepath.FromSlash(dst)
+	dst = normalizePath(filepath.FromSlash(dst))
 
 	if !o.disableMkdir {
 		err = mkdirAll(fsys, o.tempDir(dst), fs.ModePerm)
@@ -384,7 +414,7 @@ func (o SafeWriteOption) safeWrite(
 	if err != nil {
 		return fmt.Errorf("SafeWrite, %w", err)
 	}
-	tmpName := f.Name()
+	tmpName := normalizePath(f.Name())
 
 	var closeErr error
 	closed := false
@@ -410,7 +440,7 @@ func (o SafeWriteOption) safeWrite(
 		if o.disableRemoveOnErr {
 			return
 		}
-		_ = fsys.Remove(tmpName)
+		_ = fsys.RemoveAll(tmpName)
 	}()
 
 	for _, pp := range o.defaultPreProcess {
@@ -516,7 +546,7 @@ func (o SafeWriteOption) SafeWriteFs(
 		fsys,
 		dir,
 		perm,
-		o.openTmpDir,
+		o.tmpFileOption.openTmpDir,
 		func(dst afero.File) error {
 			return CopyFS(afero.NewBasePathFs(fsys, dst.Name()), src)
 		},
@@ -632,4 +662,17 @@ func randomUint32Padded() string {
 	}
 	builder.WriteString(s)
 	return builder.String()
+}
+
+func normalizePath(p string) string {
+	p = filepath.ToSlash(filepath.Clean(p))
+	if p == "." {
+		return string(filepath.Separator)
+	}
+	vol := filepath.VolumeName(p)
+	if vol != "" {
+		// absolute path
+		return p
+	}
+	return string(filepath.Separator) + strings.TrimPrefix(p, string(filepath.Separator))
 }
