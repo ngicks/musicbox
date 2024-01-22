@@ -1,0 +1,6 @@
+ DRY-RUN MODE -  Container testdata-additional-1  Stopping
+ DRY-RUN MODE -  Container testdata-additional-1  Stopped
+ DRY-RUN MODE -  Container testdata-additional-1  Removing
+ DRY-RUN MODE -  Container testdata-additional-1  Removed
+ DRY-RUN MODE -  Container testdata-sample_service-1  Recreate
+ DRY-RUN MODE -  Container testdata-sample_service-1  Recreated

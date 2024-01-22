@@ -1,0 +1,10 @@
+services:
+  additional:
+    image: ubuntu:jammy-20230624
+  additional2:
+    image: ubuntu:jammy-20230624
+    profiles:
+      - extended2
+  no_profile:
+    image: ubuntu:jammy-20230624
+

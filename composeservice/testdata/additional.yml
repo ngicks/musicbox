@@ -1,0 +1,6 @@
+services:
+  additional:
+    image: debian:bookworm-20230904
+    entrypoint: echo '{"foo":"baz"}'
+    profiles:
+      - extended

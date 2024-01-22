@@ -1,0 +1,8 @@
+ Container testdata-sample_service-1  Stopping
+ Container testdata-sample_service-1  Stopped
+ Container testdata-sample_service-1  Removing
+ Container testdata-sample_service-1  Removed
+ Volume testdata_sample-volume  Removing
+ Volume testdata_sample-volume  Removed
+ Network testdata_sample network  Removing
+ Network testdata_sample network  Removed

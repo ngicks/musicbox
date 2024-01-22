@@ -1,0 +1,1 @@
+stat /git/github.com/ngicks/compose-wrapper/compose/testdata/nonexistent.yml: no such file or directory

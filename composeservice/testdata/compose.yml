@@ -1,0 +1,23 @@
+services:
+  sample_service:
+    image: ubuntu:jammy-20230624
+    env_file:
+      - test.env
+    volumes:
+      - type: volume
+        source: sample-volume
+        target: /sample-volume
+    restart: always
+    networks:
+      - sample network
+    secrets:
+      - sample_secret
+    profiles:
+      - base
+volumes:
+  sample-volume:
+networks:
+  sample network:
+secrets:
+  sample_secret:
+    file: ./secret.txt

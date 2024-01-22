@@ -1,0 +1,8 @@
+ Network testdata_sample network  Creating
+ Network testdata_sample network  Created
+ Volume "testdata_sample-volume"  Creating
+ Volume "testdata_sample-volume"  Created
+ Container testdata-sample_service-1  Creating
+ Container testdata-additional-1  Creating
+ Container testdata-additional-1  Created
+ Container testdata-sample_service-1  Created

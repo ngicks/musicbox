@@ -1,0 +1,8 @@
+ DRY-RUN MODE -  Network testdata_sample network  Creating
+ DRY-RUN MODE -  Network testdata_sample network  Created
+ DRY-RUN MODE -  Volume "testdata_sample-volume"  Creating
+ DRY-RUN MODE -  Volume "testdata_sample-volume"  Created
+ DRY-RUN MODE -  Container testdata-sample_service-1  Creating
+ DRY-RUN MODE -  Container testdata-additional-1  Creating
+ DRY-RUN MODE -  Container testdata-sample_service-1  Created
+ DRY-RUN MODE -  Container testdata-additional-1  Created

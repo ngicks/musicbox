@@ -1,0 +1,2 @@
+ Container testdata-sample_service-1  Starting
+ Container testdata-sample_service-1  Started

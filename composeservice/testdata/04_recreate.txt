@@ -1,0 +1,6 @@
+ Container testdata-additional-1  Stopping
+ Container testdata-additional-1  Stopped
+ Container testdata-additional-1  Removing
+ Container testdata-additional-1  Removed
+ Container testdata-sample_service-1  Recreate
+ Container testdata-sample_service-1  Recreated
