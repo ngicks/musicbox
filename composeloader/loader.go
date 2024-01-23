@@ -3,14 +3,14 @@ package composeloader
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
-	"github.com/compose-spec/compose-go/loader"
-	"github.com/compose-spec/compose-go/types"
+	"github.com/compose-spec/compose-go/v2/loader"
+	"github.com/compose-spec/compose-go/v2/types"
 )
 
 type Loader struct {
@@ -18,11 +18,14 @@ type Loader struct {
 	Options [](func(*loader.Options))
 }
 
-func FromDir[T any](d *ProjectDir[T], options []func(*loader.Options)) (*Loader, error) {
+func FromDir[S, H any](d *ProjectDir[S, H], options []func(*loader.Options)) (*Loader, error) {
 	config, err := ConfigFromPath(d.ComposeYmlPath())
 	if err != nil {
 		return nil, err
 	}
+	// From v2, we don't need to preload config since
+	// we don't need reload every time a *types.Project instance is mutated.
+	// In v2, every methods which mutates *types.Project clones itself.
 	config, err = PreloadConfigDetails(config)
 	if err != nil {
 		return nil, err
@@ -56,42 +59,27 @@ func (l *Loader) Reload() error {
 	return nil
 }
 
-func cloneConfigDetails(conf types.ConfigDetails) types.ConfigDetails {
-	return types.ConfigDetails{
-		Version:     conf.Version,
-		WorkingDir:  conf.WorkingDir,
-		ConfigFiles: cloneConfigFiles(conf.ConfigFiles),
-		Environment: conf.Environment.Clone(),
-	}
-}
-
-func cloneConfigFiles(files []types.ConfigFile) []types.ConfigFile {
-	out := make([]types.ConfigFile, len(files))
-	for idx, f := range files {
-		out[idx] = types.ConfigFile{
-			Filename: f.Filename,
-			Content:  slices.Clone(f.Content),
-			Config:   maps.Clone(f.Config),
-		}
-	}
-	return out
-}
-
 // ConfigFromPath converts paths to types.ConfigDetails.
-// No loading will be done. If contents should be loaded, call PreloadConfigDetails with the returned config.
+// It only examines readability of paths and makes up types.ConfigDetails from them.
 //
-// WorkingDir will be set to the parent of path.
+// WorkingDir will be set to the parent directory of path.
 // Environment will be os.Environ.
 //
-// If any path is not readable or points to non regular file, it returns an error.
+// If any path is not readable or points to a non regular file,
+// it stop and returns the first error encountered.
 func ConfigFromPath(path string, additional ...string) (types.ConfigDetails, error) {
 	checkPath := func(p string) error {
+		f, err := os.Open(p)
+		if err != nil {
+			return fmt.Errorf("ConfigFromPath: %w", err)
+		}
+		_ = f.Close()
 		s, err := os.Stat(p)
 		if err != nil {
-			return fmt.Errorf("FromComposeYml: %w", err)
+			return fmt.Errorf("ConfigFromPath: %w", err)
 		}
-		if s.Mode()&fs.ModeType != 0 {
-			return fmt.Errorf("FromComposeYml: path is not a regular file, path = %s", p)
+		if !s.Mode().IsRegular() {
+			return fmt.Errorf("ConfigFromPath: not a regular file")
 		}
 		return nil
 	}
@@ -100,12 +88,13 @@ func ConfigFromPath(path string, additional ...string) (types.ConfigDetails, err
 		return types.ConfigDetails{}, err
 	}
 
-	paths := []string{path}
+	paths := []string{filepath.ToSlash(path)}
 	if len(additional) > 0 {
-		for _, path := range additional {
+		for i, path := range additional {
 			if err := checkPath(path); err != nil {
 				return types.ConfigDetails{}, err
 			}
+			additional[i] = filepath.ToSlash(path)
 		}
 		paths = append(paths, additional...)
 	}
@@ -113,7 +102,7 @@ func ConfigFromPath(path string, additional ...string) (types.ConfigDetails, err
 	configFiles := types.ToConfigFiles(paths)
 
 	config := types.ConfigDetails{
-		WorkingDir:  filepath.Dir(path),
+		WorkingDir:  dir(path),
 		ConfigFiles: configFiles,
 		Environment: types.NewMapping(os.Environ()),
 	}
@@ -130,7 +119,7 @@ func PreloadConfigDetails(conf types.ConfigDetails) (types.ConfigDetails, error)
 	}
 
 	if cloned.WorkingDir == "" {
-		cloned.WorkingDir = filepath.Dir(cloned.ConfigFiles[0].Filename)
+		cloned.WorkingDir = dir(cloned.ConfigFiles[0].Filename)
 	}
 
 	for i, confFile := range cloned.ConfigFiles {
@@ -166,4 +155,42 @@ func ReloadConfigDetails(conf types.ConfigDetails) (types.ConfigDetails, error) 
 	}
 
 	return PreloadConfigDetails(cloned)
+}
+
+func dir(p string) string {
+	dir := filepath.Dir(filepath.ToSlash(p))
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if dir == "." {
+		return "./"
+	}
+	if strings.HasPrefix(dir, "..") {
+		return dir
+	}
+	if !strings.HasPrefix(dir, "./") {
+		return "./" + dir
+	}
+	return dir
+}
+
+func cloneConfigDetails(conf types.ConfigDetails) types.ConfigDetails {
+	return types.ConfigDetails{
+		Version:     conf.Version,
+		WorkingDir:  conf.WorkingDir,
+		ConfigFiles: cloneConfigFiles(conf.ConfigFiles),
+		Environment: conf.Environment.Clone(),
+	}
+}
+
+func cloneConfigFiles(files []types.ConfigFile) []types.ConfigFile {
+	out := make([]types.ConfigFile, len(files))
+	for idx, f := range files {
+		out[idx] = types.ConfigFile{
+			Filename: f.Filename,
+			Content:  slices.Clone(f.Content),
+			Config:   maps.Clone(f.Config),
+		}
+	}
+	return out
 }
