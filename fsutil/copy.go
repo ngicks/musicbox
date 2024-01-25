@@ -10,15 +10,38 @@ import (
 	"github.com/spf13/afero"
 )
 
+type CopyFsOption func(o *copyFsOption)
+
+func CopyFsWithIgnoreNonRegularFile(ignoreNonRegular bool) CopyFsOption {
+	return func(o *copyFsOption) {
+		o.ignoreNonRegularFile = true
+	}
+}
+
+type copyFsOption struct {
+	// ignores non regular files instead of instant error.
+	ignoreNonRegularFile bool
+}
+
 // CopyFS copies from fs.FS to afero.FS.
 // The implementation is copied from https://github.com/golang/go/issues/62484
 // and is slightly modified.
 //
-// CopyFS only copies regular files and directories from src.
-// File permissions will be copied however their owner remains uid/gid of the process.
-func CopyFS(dst afero.Fs, src fs.FS) error {
+// The default behavior of CopyFS is:
+//   - returns an error if src contains non regular files
+//   - copies permission bits
+//     -
+func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
+	// in case that the file type of dst does not implement io.ReaderFrom or
+	// the file type of src does not implement io.WriterTo.
+	// Use 64KiB buffers and reuse them across this package to gain some performance boost.
 	buf := getBuf()
 	defer putBuf(buf)
+
+	opt := copyFsOption{}
+	for _, o := range opts {
+		o(&opt)
+	}
 
 	err := fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -55,6 +78,9 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 		}
 
 		if !d.Type().IsRegular() {
+			if opt.ignoreNonRegularFile {
+				return nil
+			}
 			return fmt.Errorf("%w: non regular file is not supported.", ErrBadInput)
 		}
 
@@ -62,12 +88,23 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 		if err != nil {
 			return err
 		}
-		defer func() { _ = r.Close() }()
+
+		rClosed := false
+		var rCloseErr error
+		closeROnce := func() error {
+			if !rClosed {
+				rClosed = true
+				rCloseErr = r.Close()
+			}
+			return rCloseErr
+		}
+		defer func() { _ = closeROnce() }()
 
 		w, err := dst.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fs.ModePerm)
 		if err != nil {
 			return err
 		}
+		// TODO: close only once
 		defer func() { _ = w.Close() }()
 
 		err = chmod()
@@ -79,7 +116,13 @@ func CopyFS(dst afero.Fs, src fs.FS) error {
 			return fmt.Errorf("copying %s, %w", path, err)
 		}
 
+		if err := closeROnce(); err != nil {
+			return err
+		}
 		if err := w.Sync(); err != nil {
+			return err
+		}
+		if err := w.Close(); err != nil {
 			return err
 		}
 
