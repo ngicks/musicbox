@@ -12,16 +12,31 @@ import (
 
 type CopyFsOption func(o *copyFsOption)
 
-func CopyFsWithIgnoreNonRegularFile(ignoreNonRegular bool) CopyFsOption {
+func CopyFsWithIgnoreNonRegularFile() CopyFsOption {
 	return func(o *copyFsOption) {
-		o.ignoreNonRegularFile = true
+		o.handleNonRegularFile = nonRegularFileHandlingIgnore
+	}
+}
+
+func CopyFsWithOverridePermission(chmodIf func(path string) (perm fs.FileMode, ok bool)) CopyFsOption {
+	return func(o *copyFsOption) {
+		o.chmodIf = chmodIf
 	}
 }
 
 type copyFsOption struct {
 	// ignores non regular files instead of instant error.
-	ignoreNonRegularFile bool
+	handleNonRegularFile nonRegularFileHandling
+	chmodIf              func(path string) (perm fs.FileMode, ok bool)
 }
+
+type nonRegularFileHandling string
+
+const (
+	nonRegularFileHandlingError  nonRegularFileHandling = "" // default is to return an error.
+	nonRegularFileHandlingIgnore nonRegularFileHandling = "ignore"
+	// nonRegularFileHandlingTrySymlink nonRegularFileHandling = "try_symlink"
+)
 
 // CopyFS copies from fs.FS to afero.FS.
 // The implementation is copied from https://github.com/golang/go/issues/62484
@@ -30,7 +45,7 @@ type copyFsOption struct {
 // The default behavior of CopyFS is:
 //   - returns an error if src contains non regular files
 //   - copies permission bits
-//     -
+//   - makes directories with fs.ModePerm (o0777).
 func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	// in case that the file type of dst does not implement io.ReaderFrom or
 	// the file type of src does not implement io.WriterTo.
@@ -60,7 +75,16 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		}
 
 		chmod := func() error {
-			err = dst.Chmod(target, ss.Mode().Perm())
+			perm := ss.Mode().Perm()
+
+			if opt.chmodIf != nil {
+				customPerm, ok := opt.chmodIf(target)
+				if ok {
+					perm = customPerm
+				}
+			}
+
+			err = dst.Chmod(target, perm)
 			if err != nil {
 				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", target, err)
 			}
@@ -78,10 +102,13 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		}
 
 		if !d.Type().IsRegular() {
-			if opt.ignoreNonRegularFile {
+			switch opt.handleNonRegularFile {
+			case nonRegularFileHandlingError: // default
+				return fmt.Errorf("%w: non regular file is not supported.", ErrBadInput)
+			case nonRegularFileHandlingIgnore:
 				return nil
+				// case nonRegularFileHandlingTrySymlink:
 			}
-			return fmt.Errorf("%w: non regular file is not supported.", ErrBadInput)
 		}
 
 		r, err := src.Open(path)
