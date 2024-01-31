@@ -26,7 +26,7 @@ var fakeErr = errors.New("fake")
 //   - Equal takes stat of every file in l and r.
 //   - Also all dirents of directories are read.
 //   - Files are entirely read
-func Equal(l, r fs.FS) (bool, error) {
+func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
 	equal := true
 	err := fs.WalkDir(l, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
