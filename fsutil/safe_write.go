@@ -210,6 +210,7 @@ func PostProcessValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProc
 
 // Should it use builder pattern?
 
+// SafeWriteOption holds options for safe-write.
 type SafeWriteOption struct {
 	tmpFileOption
 
@@ -234,6 +235,8 @@ type SafeWriteOption struct {
 	disableSync bool
 }
 
+// NewSafeWriteOption returns a newly allocated SafeWriteOption.
+// Without any options, it uses "-*" as random file suffix pattern.
 func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	o := &SafeWriteOption{
 		tmpFileOption: tmpFileOption{
@@ -251,6 +254,7 @@ func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	return o
 }
 
+// Apply clones o and then applies options to the cloned instance.
 func (o SafeWriteOption) Apply(opts ...SafeWriteOptionOption) *SafeWriteOption {
 	for _, opt := range opts {
 		opt(&o)
@@ -397,6 +401,11 @@ func isEmpty(path string) bool {
 	return path == "" || path == "." || path == string(filepath.Separator)
 }
 
+// CleanTmp erases all temporal file under fsys.
+// If o is configured to have a dedicated tmp directory,
+// then CleanTmp removes all dirents under the directory.
+//
+// If temp file suffix and prefix is specified, CleanTmp removes matched files.
 func (o SafeWriteOption) CleanTmp(fsys afero.Fs) error {
 	if err := o.tmpFileOption.cleanTmp(fsys); err != nil {
 		return fmt.Errorf("CleanTmp: %w", err)
@@ -527,6 +536,15 @@ func (o SafeWriteOption) safeWrite(
 	return nil
 }
 
+// SafeWrite writes the content of r to path under fsys safely.
+//
+// SafeWrite first creates a temporal directory and a temporal file there.
+// Then it writes the content of r to the file.
+// After the content is fully written, it calls rename to move the file to path.
+//
+// Be cautious when path already exists, SafeWrite overwrites the file.
+//
+// SafeWrite switches its behavior based on configuration of o.
 func (o SafeWriteOption) SafeWrite(
 	fsys afero.Fs,
 	path string,
@@ -549,6 +567,15 @@ func (o SafeWriteOption) SafeWrite(
 	)
 }
 
+// SafeWriteFs copies content of src into dir under fsys.
+//
+// SafeWriteFs first creates a temporal directory.
+// Then it writes the content of src to there.
+// After src is fully copied, it calls rename to move the file to path,
+// which also indicates that if dir already exists and non empty,
+// SafeWriteFs fails to rename the directory.
+//
+// SafeWriteFs switches its behavior based on configuration of o.
 func (o SafeWriteOption) SafeWriteFs(
 	fsys afero.Fs,
 	dir string,
