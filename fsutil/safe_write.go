@@ -67,6 +67,16 @@ func WithIgnoreMatchedErr(ignoreMatchedErr func(err error) bool) SafeWriteOption
 	}
 }
 
+func WithCopyFsOptions(copyFsOptions []CopyFsOption) SafeWriteOptionOption {
+	return func(o *SafeWriteOption) {
+		if len(copyFsOptions) > 0 {
+			o.copyFsOptions = copyFsOptions
+		} else {
+			o.copyFsOptions = make([]CopyFsOption, 0)
+		}
+	}
+}
+
 func validNonPattern(s string, cat string) error {
 	if strings.Contains(s, "*") {
 		return fmt.Errorf("%w: %s contains '*'", ErrBadPattern, cat)
@@ -212,6 +222,9 @@ type SafeWriteOption struct {
 	// If ignoreMatchedErr is non nil and returns true, skip temp file removal.
 	ignoreMatchedErr func(err error) bool
 
+	// copyFsOptions will be applied when and only when SafeWriteFs is called.
+	copyFsOptions []CopyFsOption
+
 	// If non negative number, SafeWrite performs Chown after each file creation.
 	uid, gid          int
 	defaultPreProcess []SafeWritePreProcess
@@ -226,8 +239,9 @@ func NewSafeWriteOption(opts ...SafeWriteOptionOption) *SafeWriteOption {
 		tmpFileOption: tmpFileOption{
 			randomPattern: "-*",
 		},
-		uid: -1,
-		gid: -1,
+		copyFsOptions: make([]CopyFsOption, 0),
+		uid:           -1,
+		gid:           -1,
 	}
 
 	for _, opt := range opts {
@@ -548,7 +562,7 @@ func (o SafeWriteOption) SafeWriteFs(
 		perm,
 		o.tmpFileOption.openTmpDir,
 		func(dst afero.File) error {
-			return CopyFS(afero.NewBasePathFs(fsys, dst.Name()), src)
+			return CopyFS(afero.NewBasePathFs(fsys, dst.Name()), src, o.copyFsOptions...)
 		},
 		postProcesses...,
 	)
