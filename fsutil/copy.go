@@ -88,24 +88,15 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		if err != nil {
 			return err
 		}
-
-		rClosed := false
-		var rCloseErr error
-		closeROnce := func() error {
-			if !rClosed {
-				rClosed = true
-				rCloseErr = r.Close()
-			}
-			return rCloseErr
-		}
+		closeROnce := once(r.Close)
 		defer func() { _ = closeROnce() }()
 
 		w, err := dst.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fs.ModePerm)
 		if err != nil {
 			return err
 		}
-		// TODO: close only once
-		defer func() { _ = w.Close() }()
+		closeWOnce := once(w.Close)
+		defer func() { _ = closeWOnce() }()
 
 		err = chmod()
 		if err != nil {
@@ -122,7 +113,7 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		if err := w.Sync(); err != nil {
 			return err
 		}
-		if err := w.Close(); err != nil {
+		if err := closeWOnce(); err != nil {
 			return err
 		}
 
@@ -133,4 +124,17 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		return fmt.Errorf("fsutil.CopyFS: %w", err)
 	}
 	return nil
+}
+
+func once[T any](fn func() T) func() T {
+	called := false
+	var result T
+	return func() T {
+		if called {
+			return result
+		}
+		called = true
+		result = fn()
+		return result
+	}
 }
