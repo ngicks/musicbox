@@ -338,12 +338,12 @@ func (o tmpFileOption) open(
 	perm fs.FileMode,
 	openRandom func(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error),
 	openFile func(name string, flag int, perm fs.FileMode) (afero.File, error),
-) (f afero.File, err error) {
+) (f afero.File, tmpFilename string, err error) {
 	tmpDir := o.tempDir(path)
 
 	name := filepath.Clean(filepath.Base(path))
 	if isEmpty(name) {
-		return nil, fmt.Errorf("%w", ErrBadName)
+		return nil, "", fmt.Errorf("%w", ErrBadName)
 	}
 
 	var openName string
@@ -368,20 +368,20 @@ func (o tmpFileOption) open(
 		)
 	}
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"dir = %s, base = %s, %w",
 			tmpDir, openName, err,
 		)
 	}
 
-	return f, nil
+	return f, filepath.Join(tmpDir, filepath.Base(f.Name())), nil
 }
 
-func (o tmpFileOption) openTmp(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error) {
+func (o tmpFileOption) openTmp(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error) {
 	return o.open(fsys, path, perm, OpenFileRandom, fsys.OpenFile)
 }
 
-func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error) {
+func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error) {
 	return o.open(
 		fsys,
 		path,
@@ -417,7 +417,7 @@ func (o SafeWriteOption) safeWrite(
 	fsys afero.Fs,
 	dst string,
 	perm fs.FileMode,
-	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, err error),
+	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error),
 	copyTo func(dst afero.File) error,
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
@@ -433,11 +433,11 @@ func (o SafeWriteOption) safeWrite(
 		}
 	}
 
-	f, err := openTmp(fsys, dst, perm.Perm())
+	f, tmpName, err := openTmp(fsys, dst, perm.Perm())
 	if err != nil {
 		return fmt.Errorf("SafeWrite, %w", err)
 	}
-	tmpName := normalizePath(f.Name())
+	tmpName = normalizePath(tmpName)
 
 	var closeErr error
 	closed := false

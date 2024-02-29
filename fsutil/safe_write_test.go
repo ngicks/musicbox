@@ -186,7 +186,7 @@ func TestSafeWrite(t *testing.T) {
 			opt := NewSafeWriteOption(tc.opts...)
 
 			assertCalled := false
-			var seenPathsBefore, seenPathsAfter []string
+			seenPathsBefore, seenPathsAfter := []string{}, []string{}
 			assertBeforeRename := func(fsys afero.Fs, name string, file afero.File) error {
 				assertCalled = true
 				seenPathsBefore := collectPath(fsys)
