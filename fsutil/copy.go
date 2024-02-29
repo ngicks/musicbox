@@ -45,7 +45,7 @@ const (
 // The default behavior of CopyFS is:
 //   - returns an error if src contains non regular files
 //   - copies permission bits
-//   - makes directories with fs.ModePerm (o0777).
+//   - makes directories with fs.ModePerm (o0777) before umask.
 func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	// in case that the file type of dst does not implement io.ReaderFrom or
 	// the file type of src does not implement io.WriterTo.
@@ -53,10 +53,7 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	buf := getBuf()
 	defer putBuf(buf)
 
-	opt := copyFsOption{}
-	for _, o := range opts {
-		o(&opt)
-	}
+	opt := newCopyFsOption(opts...)
 
 	err := fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -151,6 +148,14 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 		return fmt.Errorf("fsutil.CopyFS: %w", err)
 	}
 	return nil
+}
+
+func newCopyFsOption(opts ...CopyFsOption) copyFsOption {
+	opt := copyFsOption{}
+	for _, o := range opts {
+		o(&opt)
+	}
+	return opt
 }
 
 func once[T any](fn func() T) func() T {

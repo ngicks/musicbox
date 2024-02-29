@@ -1,6 +1,6 @@
 module github.com/ngicks/musicbox/fsutil
 
-go 1.21.0
+go 1.22.0
 
 require (
 	github.com/spf13/afero v1.11.0

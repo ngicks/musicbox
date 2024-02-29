@@ -1,6 +1,6 @@
 module github.com/ngicks/musicbox/storage
 
-go 1.21.0
+go 1.22.0
 
 require (
 	github.com/ngicks/musicbox/fsutil v0.0.0-20240114190950-ed6807e702d0

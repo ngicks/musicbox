@@ -27,14 +27,21 @@ var fakeErr = errors.New("fake")
 //   - Also all dirents of directories are read.
 //   - Files are entirely read
 func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
-	equal := true
+	opt := newCopyFsOption(opts...)
+
 	err := fs.WalkDir(l, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if !d.IsDir() && d.Type()&fs.ModeType != 0 {
-			return fmt.Errorf("only directories and regular files are supported")
+		if !d.IsDir() && d.Type().Type() != 0 {
+			switch opt.handleNonRegularFile {
+			case nonRegularFileHandlingError: // default
+				return fmt.Errorf("%w: only directories and regular files are supported", ErrBadInput)
+			case nonRegularFileHandlingIgnore:
+				return nil
+				// case nonRegularFileHandlingTrySymlink:
+			}
 		}
 
 		var lf, rf fs.File
@@ -86,7 +93,7 @@ func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
 				return fakeErr
 			}
 		} else {
-			equal, err = sameFile(lf, rf)
+			equal, err := sameFile(lf, rf)
 			if err != nil {
 				return err
 			}
@@ -98,6 +105,7 @@ func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
 		return nil
 	})
 
+	var equal = true
 	if err != nil {
 		equal = false
 	}
