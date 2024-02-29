@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import (
 	"context"

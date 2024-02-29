@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import (
 	"context"
@@ -18,15 +18,15 @@ import (
 //
 // If clientOpt is nil, cli will be initialized with &flags.ClientOptions{Context: "default"}.
 //
-// ops will be applied twice, therefore all ops must be idempotent and/or must be aware of it.
+// opts will be applied twice, therefore all ops must be idempotent and/or must be aware of it.
 // This is to encounter the case where passing malformed *flag.ClientOptions may cause it to exit by calling os.Exit(1).
 // To prevent it from silently dying, this function sets err output stream to os.Stderr if it is not set.
 // After initialization, it re-applies ops to ensure err output stream is what the caller wants to be.
 func InitializeDockerCli(
 	clientOpt *flags.ClientOptions,
-	ops ...command.DockerCliOption,
+	opts ...command.CLIOption,
 ) (cli *command.DockerCli, err error) {
-	dockerCli, err := command.NewDockerCli(ops...)
+	dockerCli, err := command.NewDockerCli(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func InitializeDockerCli(
 	_ = dockerCli.Client()
 
 	_ = dockerCli.Apply(command.WithErrorStream(nil))
-	if err := dockerCli.Apply(ops...); err != nil {
+	if err := dockerCli.Apply(opts...); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +129,7 @@ func NewLoader(
 	configDetails types.ConfigDetails,
 	options []func(*loader.Options),
 	clientOpt *flags.ClientOptions,
-	ops ...command.DockerCliOption,
+	ops ...command.CLIOption,
 ) (*Loader, error) {
 	dockerCli, err := InitializeDockerCli(clientOpt, ops...)
 	if err != nil {
@@ -157,7 +157,7 @@ func (l *Loader) Load(ctx context.Context) (*types.Project, error) {
 	)
 }
 
-func (l *Loader) LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*ComposeService, error) {
+func (l *Loader) LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*Service, error) {
 	project, err := l.Load(ctx)
 	if err != nil {
 		return nil, err
@@ -169,7 +169,7 @@ func (l *Loader) LoadComposeService(ctx context.Context, ops ...func(p *types.Pr
 		}
 	}
 
-	return NewComposeService(
+	return NewService(
 		l.ProjectName,
 		project,
 		l.DockerCli,

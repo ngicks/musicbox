@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import "github.com/compose-spec/compose-go/v2/types"
 

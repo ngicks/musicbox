@@ -6,7 +6,9 @@
         "dire",
         "dirents",
         "fsutil",
-        "fsys"
+        "fsys",
+        "musicbox",
+        "ngicks"
     ],
     "go.lintTool": "golangci-lint",
     "go.inlayHints.assignVariableTypes": true,

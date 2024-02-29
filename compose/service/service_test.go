@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import (
 	"context"
@@ -13,12 +13,12 @@ func TestComposeService_dind(t *testing.T) {
 	composeService, err := loaderAdditional.LoadComposeService(context.Background())
 	assert.NilError(t, err)
 
-	dryRunCtx, err := composeService.DryRunMode(context.Background(), true)
+	dryRunService, dryRunCtx, err := composeService.DryRunMode(context.Background())
 	assert.NilError(t, err)
 
-	out, err := composeService.Create(dryRunCtx, api.CreateOptions{})
+	out, err := dryRunService.Create(dryRunCtx, api.CreateOptions{})
 	assert.NilError(t, err)
 
-	delete(out.Resource, "Network:default")
+	delete(out.Resource, NamedResource{"Network", "default"})
 	assert.Assert(t, cmp.DeepEqual(createDryRunOutputResourceMap, out.Resource))
 }

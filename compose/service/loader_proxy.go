@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import (
 	"context"
@@ -16,7 +16,7 @@ type ComposeProjectLoader interface {
 }
 
 type ComposeServiceLoader interface {
-	LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*ComposeService, error)
+	LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*Service, error)
 }
 
 var _ ComposeProjectLoader = (*LoaderProxy)(nil)
@@ -50,7 +50,7 @@ func (p *LoaderProxy) Load(ctx context.Context) (*types.Project, error) {
 	return p.loader.Load(ctx)
 }
 
-func (p *LoaderProxy) LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*ComposeService, error) {
+func (p *LoaderProxy) LoadComposeService(ctx context.Context, ops ...func(p *types.Project) error) (*Service, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.loader.LoadComposeService(ctx, ops...)

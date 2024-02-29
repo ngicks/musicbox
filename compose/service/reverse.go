@@ -1,4 +1,4 @@
-package composeservice
+package service
 
 import (
 	"slices"
@@ -33,7 +33,7 @@ func Reverse(src *types.Project) (dst *types.Project, err error) {
 
 // EnableAll adds DisabledServices to Services and set empty Services to DisabledServices.
 func EnableAll(p *types.Project) *types.Project {
-	cloned, _ := p.WithProfiles(nil)
+	cloned, _ := p.WithProfiles([]string{"*"})
 	for k, v := range cloned.DisabledServices {
 		cloned.Services[k] = v
 	}
