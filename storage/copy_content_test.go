@@ -150,14 +150,14 @@ func TestCopyContents(t *testing.T) {
 		err := CopyContents(handle, content)
 		assert.NilError(t, err)
 
-		var eq bool
-		eq, err = fsutil.Equal(afero.NewIOFS(handle.Foo), content.Foo)
+		var result fsutil.EqualResult
+		result, err = fsutil.Equal(afero.NewIOFS(handle.Foo), content.Foo)
 		assert.NilError(t, err)
-		assert.Assert(t, eq)
+		assert.Assert(t, result.Equal())
 
-		eq, err = fsutil.Equal(afero.NewIOFS(handle.Bar), content.Bar)
+		result, err = fsutil.Equal(afero.NewIOFS(handle.Bar), content.Bar)
 		assert.NilError(t, err)
-		assert.Assert(t, eq)
+		assert.Assert(t, result.Equal())
 	})
 
 	t.Run("skip nil FS", func(t *testing.T) {
@@ -185,9 +185,9 @@ func TestCopyContents(t *testing.T) {
 		err := CopyContents(handle, content)
 		assert.NilError(t, err)
 
-		eq, err := fsutil.Equal(afero.NewIOFS(handle.Foo), content.Foo)
+		result, err := fsutil.Equal(afero.NewIOFS(handle.Foo), content.Foo)
 		assert.NilError(t, err)
-		assert.Assert(t, eq)
+		assert.Assert(t, result.Equal())
 
 		dirents, err := afero.ReadDir(handle.Bar, ".")
 		assert.NilError(t, err)
