@@ -372,7 +372,7 @@ func assertFsUnder(base string, fsys fs.FS) assertAfter {
 		t.Helper()
 		eq, err := Equal(fsys, afero.NewIOFS(afero.NewBasePathFs(fsys_, base)))
 		assert.NilError(t, err)
-		assert.Assert(t, eq)
+		assert.Assert(t, eq.Equal(), "not equal: reports = %v", eq)
 	}
 }
 

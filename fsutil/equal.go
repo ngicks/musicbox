@@ -6,19 +6,55 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 )
 
-var fakeErr = errors.New("fake")
+type EqualReason string
 
-// Equal compares l and r and returns true if both have same contents.
+const (
+	EqualReasonModeMismatch             = "mode mismatch"
+	EqualReasonFileContentMismatch      = "file content mismatch"
+	EqualReasonDirectoryContentMismatch = "directory content mismatch"
+)
+
+type EqualResult []EqualReport
+
+func (r EqualResult) Equal() bool {
+	return len(r) == 0
+}
+
+// Select filters r and returns a shallowly copied instance.
+// The returned result only contains reports for which filterFn returns true.
+func (r EqualResult) Select(filterFn func(r EqualReport) bool) EqualResult {
+	var out EqualResult
+	for _, rep := range r {
+		if filterFn(rep) {
+			out = append(out, rep)
+		}
+	}
+	return out
+}
+
+type EqualReport struct {
+	Reason EqualReason
+	// Path is a path for a mismatching file or directory.
+	Path string
+	// Values for Reason of Path.
+	// fs.FileMode for EqualReasonModeMismatch,
+	// nil for EqualReasonFileContentMismatch
+	// and []string describing names of dirents for EqualReasonDirectoryContentMismatch.
+	DstVal, SrcVal any
+}
+
+// Equal compares dst and src and reports result.
 //
 // The comparison evaluates
 //   - mode bits of dirents
 //   - content of directory
 //   - content of regular files
 //
-// Equal returns immediately an error if l has other than directories or regular files.
+// Equal takes also CopyFsOption. Options work as if dst was dst of CopyFs.
+// That is, for example, if CopyFsWithOverridePermission is set,
+// Equal compares dst's file's mode against returned value of chmodIf instead of src's.
 //
 // Note that mode bits of the root directory is ignored since often it is not controlled.
 //
@@ -26,17 +62,19 @@ var fakeErr = errors.New("fake")
 //   - Equal takes stat of every file in l and r.
 //   - Also all dirents of directories are read.
 //   - Files are entirely read
-func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
+func Equal(dst, src fs.FS, opts ...CopyFsOption) (EqualResult, error) {
+	var result EqualResult
+
 	opt := newCopyFsOption(opts...)
 
-	err := fs.WalkDir(l, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(dst, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if !d.IsDir() && d.Type().Type() != 0 {
 			switch opt.handleNonRegularFile {
-			case nonRegularFileHandlingError: // default
+			default: // nonRegularFileHandlingError
 				return fmt.Errorf("%w: only directories and regular files are supported", ErrBadInput)
 			case nonRegularFileHandlingIgnore:
 				return nil
@@ -44,79 +82,137 @@ func Equal(l, r fs.FS, opts ...CopyFsOption) (bool, error) {
 			}
 		}
 
-		var lf, rf fs.File
+		dstFile, err := dst.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = dstFile.Close() }()
+
+		dstInfo, err := dstFile.Stat()
+		if err != nil {
+			return err
+		}
+
+		srcFile, err := src.Open(path)
+		if err != nil {
+			// number of dirents are already checked. See below.
+			// ErrNotExist is possible since there could be difference.
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		defer func() { _ = srcFile.Close() }()
+
+		srcInfo, err := srcFile.Stat()
+		if err != nil {
+			return err
+		}
+
 		// no mode bits comparison for root dir.
 		if path != "." {
-			// comparing mode bits.
-			lf, err = l.Open(path)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = lf.Close() }()
-
-			ls, err := lf.Stat()
-			if err != nil {
-				return err
-			}
-
-			rf, err = r.Open(path)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return fakeErr
-				}
-				return err
-			}
-			defer func() { _ = rf.Close() }()
-
-			rs, err := rf.Stat()
-			if err != nil {
-				return err
-			}
-
-			if ls.Mode() != rs.Mode() {
-				return fakeErr
+			if report, eq := sameMode(dstInfo.Mode(), srcInfo.Mode(), path, opt); !eq {
+				result = append(result, report)
 			}
 		}
 
-		if d.IsDir() {
-			lDirents, err := fs.ReadDir(l, path)
+		switch {
+		case dstInfo.Mode().Type() != srcInfo.Mode().Type():
+			// already reported by mode bit comparison.
+		case dstInfo.IsDir():
+			dstDirents, err := fs.ReadDir(dst, path)
 			if err != nil {
 				return err
 			}
 
-			rDirents, err := fs.ReadDir(r, path)
+			srcDirents, err := fs.ReadDir(src, path)
 			if err != nil {
 				return err
 			}
 
-			if len(lDirents) != len(rDirents) {
-				return fakeErr
+			if !sameNames(dstDirents, srcDirents) {
+				result = append(result, EqualReport{
+					Reason: EqualReasonDirectoryContentMismatch,
+					Path:   path,
+					DstVal: direntNames(dstDirents),
+					SrcVal: direntNames(srcDirents),
+				})
 			}
-		} else {
-			equal, err := sameFile(lf, rf)
+		case dstInfo.Mode().IsRegular():
+			equal, err := sameFile(dstFile, srcFile)
 			if err != nil {
 				return err
 			}
 			if !equal {
-				return fakeErr
+				result = append(result, EqualReport{
+					Reason: EqualReasonFileContentMismatch,
+					Path:   path,
+					DstVal: nil,
+					SrcVal: nil,
+				})
 			}
 		}
 
 		return nil
 	})
 
-	var equal = true
-	if err != nil {
-		equal = false
-	}
-	if errors.Is(err, fakeErr) {
-		err = nil
-	}
 	if err != nil {
 		err = fmt.Errorf("fsutil.Equal: %w", err)
 	}
 
-	return equal, err
+	return result, err
+}
+
+func sameMode(dst, src fs.FileMode, path string, opt copyFsOption) (EqualReport, bool) {
+	report := EqualReport{
+		Reason: EqualReasonModeMismatch,
+		Path:   path,
+		DstVal: dst,
+		SrcVal: src,
+	}
+	if dst.Type() != src.Type() {
+		return report, false
+	}
+
+	if opt.chmodIf != nil {
+		overridden, ok := opt.chmodIf(path)
+		if ok {
+			if dst.Perm() != overridden.Perm() {
+				report.SrcVal = src.Type() | overridden.Perm()
+				return report, false
+			}
+			return EqualReport{}, true
+		}
+	}
+
+	if !opt.noChmod && dst != src {
+		return report, false
+	}
+
+	return EqualReport{}, true
+}
+
+// assumption: dst and src are already sorted.
+func sameNames(dst, src []fs.DirEntry) bool {
+	if len(dst) != len(src) {
+		return false
+	}
+
+	for i := range dst {
+		if dst[i].Name() != src[i].Name() {
+			return false
+		}
+	}
+
+	return true
+}
+
+func direntNames(dirents []fs.DirEntry) []string {
+	names := make([]string, len(dirents))
+	for i, dirent := range dirents {
+		names[i] = dirent.Name()
+	}
+	return names
 }
 
 func sameFile(r, l fs.File) (bool, error) {

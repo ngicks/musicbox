@@ -32,7 +32,7 @@ func TestEqual_sameFile(t *testing.T) {
 		"random1_2": {
 			Data: random1,
 		},
-		"random1_last_2bytes_modified": {
+		"random1_last_12bytes_modified": {
 			Data: modifyLastNBytes(random1, 12),
 		},
 		"random2": {
@@ -54,7 +54,7 @@ func TestEqual_sameFile(t *testing.T) {
 	}
 
 	for _, tc := range [][2]string{
-		{"random1", "random1_last_2bytes_modified"},
+		{"random1", "random1_last_12bytes_modified"},
 		{"random1", "random2"},
 	} {
 		f1, _ := mapFs.Open(tc[0])
@@ -102,7 +102,7 @@ func TestEqual(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			eq, err := Equal(p.l, p.r)
 			assert.NilError(t, err)
-			assert.Assert(t, eq)
+			assert.Assert(t, eq.Equal())
 		})
 	}
 
@@ -149,7 +149,7 @@ func TestEqual(t *testing.T) {
 				ignoreHiddenFile(p.l),
 			)
 			assert.NilError(t, err)
-			assert.Assert(t, !eq)
+			assert.Assert(t, !eq.Equal())
 		})
 	}
 }

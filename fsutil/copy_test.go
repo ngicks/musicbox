@@ -45,7 +45,7 @@ func TestCopy(t *testing.T) {
 
 			eq, err := Equal(src, afero.NewIOFS(dst), tc.opt...)
 			assert.NilError(t, err)
-			assert.Assert(t, eq)
+			assert.Assert(t, eq.Equal())
 
 			if len(tc.opt) == 0 {
 				return
@@ -57,7 +57,7 @@ func TestCopy(t *testing.T) {
 			assert.NilError(t, err)
 			eq, err = Equal(src, afero.NewIOFS(dst), tc.opt...)
 			assert.NilError(t, err)
-			assert.Assert(t, !eq)
+			assert.Assert(t, !eq.Equal())
 		})
 	}
 }

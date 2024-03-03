@@ -439,18 +439,10 @@ func (o SafeWriteOption) safeWrite(
 	}
 	tmpName = normalizePath(tmpName)
 
-	var closeErr error
-	closed := false
 	// Multiple calls for Close is documented as undefined.
 	// Just simple boolean flag is enough since
 	// the calling goroutine is only the current g.
-	closeOnce := func() error {
-		if !closed {
-			closed = true
-			closeErr = f.Close()
-		}
-		return closeErr
-	}
+	closeOnce := once(func() error { return f.Close() })
 
 	defer func() {
 		_ = closeOnce()

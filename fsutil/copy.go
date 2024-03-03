@@ -6,29 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/afero"
 )
-
-type CopyFsOption func(o *copyFsOption)
-
-func CopyFsWithIgnoreNonRegularFile() CopyFsOption {
-	return func(o *copyFsOption) {
-		o.handleNonRegularFile = nonRegularFileHandlingIgnore
-	}
-}
-
-func CopyFsWithOverridePermission(chmodIf func(path string) (perm fs.FileMode, ok bool)) CopyFsOption {
-	return func(o *copyFsOption) {
-		o.chmodIf = chmodIf
-	}
-}
-
-type copyFsOption struct {
-	// ignores non regular files instead of instant error.
-	handleNonRegularFile nonRegularFileHandling
-	chmodIf              func(path string) (perm fs.FileMode, ok bool)
-}
 
 type nonRegularFileHandling string
 
@@ -38,9 +19,42 @@ const (
 	// nonRegularFileHandlingTrySymlink nonRegularFileHandling = "try_symlink"
 )
 
+type copyFsOption struct {
+	// ignores non regular files instead of instant error.
+	handleNonRegularFile nonRegularFileHandling
+	chmodIf              func(path string) (perm fs.FileMode, ok bool)
+	noChmod              bool
+}
+
+func newCopyFsOption(opts ...CopyFsOption) copyFsOption {
+	opt := copyFsOption{}
+	for _, o := range opts {
+		o(&opt)
+	}
+	return opt
+}
+
+type CopyFsOption func(o *copyFsOption)
+
+func CopyFsWithIgnoreNonRegularFile() CopyFsOption {
+	return func(o *copyFsOption) {
+		o.handleNonRegularFile = nonRegularFileHandlingIgnore
+	}
+}
+
+func CopyFsWithNoChmod(noChmod bool) CopyFsOption {
+	return func(o *copyFsOption) {
+		o.noChmod = noChmod
+	}
+}
+
+func CopyFsWithOverridePermission(chmodIf func(path string) (perm fs.FileMode, ok bool)) CopyFsOption {
+	return func(o *copyFsOption) {
+		o.chmodIf = chmodIf
+	}
+}
+
 // CopyFS copies from fs.FS to afero.FS.
-// The implementation is copied from https://github.com/golang/go/issues/62484
-// and is slightly modified.
 //
 // The default behavior of CopyFS is:
 //   - returns an error if src contains non regular files
@@ -64,84 +78,7 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 			return nil
 		}
 
-		target := filepath.FromSlash(path)
-
-		ss, err := d.Info()
-		if err != nil {
-			return err
-		}
-
-		chmod := func() error {
-			perm := ss.Mode().Perm()
-
-			if opt.chmodIf != nil {
-				customPerm, ok := opt.chmodIf(target)
-				if ok {
-					perm = customPerm
-				}
-			}
-
-			err = dst.Chmod(target, perm)
-			if err != nil {
-				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", target, err)
-			}
-			return nil
-		}
-
-		if d.IsDir() {
-			if err := dst.MkdirAll(target, fs.ModePerm); err != nil {
-				return err
-			}
-			if err := chmod(); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		if !d.Type().IsRegular() {
-			switch opt.handleNonRegularFile {
-			case nonRegularFileHandlingError: // default
-				return fmt.Errorf("%w: non regular file is not supported.", ErrBadInput)
-			case nonRegularFileHandlingIgnore:
-				return nil
-				// case nonRegularFileHandlingTrySymlink:
-			}
-		}
-
-		r, err := src.Open(path)
-		if err != nil {
-			return err
-		}
-		closeROnce := once(r.Close)
-		defer func() { _ = closeROnce() }()
-
-		w, err := dst.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fs.ModePerm)
-		if err != nil {
-			return err
-		}
-		closeWOnce := once(w.Close)
-		defer func() { _ = closeWOnce() }()
-
-		err = chmod()
-		if err != nil {
-			return err
-		}
-
-		if _, err := io.CopyBuffer(w, r, *buf); err != nil {
-			return fmt.Errorf("copying %s, %w", path, err)
-		}
-
-		if err := closeROnce(); err != nil {
-			return err
-		}
-		if err := w.Sync(); err != nil {
-			return err
-		}
-		if err := closeWOnce(); err != nil {
-			return err
-		}
-
-		return nil
+		return copyPath(dst, src, path, opt, buf)
 	})
 
 	if err != nil {
@@ -150,14 +87,126 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	return nil
 }
 
-func newCopyFsOption(opts ...CopyFsOption) copyFsOption {
-	opt := copyFsOption{}
-	for _, o := range opts {
-		o(&opt)
+func CopyFsPath(dst afero.Fs, src fs.FS, paths []string, opts ...CopyFsOption) error {
+	buf := getBuf()
+	defer putBuf(buf)
+
+	opt := newCopyFsOption(opts...)
+
+	for _, path := range paths {
+		target := filepath.Clean(filepath.FromSlash(path))
+		if strings.HasPrefix(target, "..") {
+			return fmt.Errorf("fsutil.CopyFsPath: path is out of src, path = %s: %w", target, fs.ErrNotExist)
+		}
+
+		var err error
+
+		// Should we avoid creating "."?
+		err = dst.MkdirAll(filepath.Dir(target), fs.ModePerm)
+		if err != nil {
+			return fmt.Errorf("fsutil.CopyFsPath: mkdirAll: %w", err)
+		}
+
+		err = copyPath(dst, src, path, opt, buf)
+		if err != nil {
+			return fmt.Errorf("fsutil.CopyFsPath: %w", err)
+		}
 	}
-	return opt
+
+	return nil
 }
 
+func copyPath(dst afero.Fs, src fs.FS, path string, opt copyFsOption, buf *[]byte) error {
+	target := filepath.FromSlash(path)
+
+	r, err := src.Open(path)
+	if err != nil {
+		return err
+	}
+	closeROnce := once(func() error { return r.Close() })
+	defer func() { _ = closeROnce() }()
+
+	rInfo, err := r.Stat()
+	if err != nil {
+		return err
+	}
+
+	chmod := func() error {
+		perm := rInfo.Mode().Perm()
+
+		var ok bool
+		if opt.chmodIf != nil {
+			var overridden fs.FileMode
+			overridden, ok = opt.chmodIf(target)
+			if ok {
+				perm = overridden
+			}
+		}
+
+		if ok || !opt.noChmod {
+			err = dst.Chmod(target, perm)
+			if err != nil {
+				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", target, err)
+			}
+		}
+		return nil
+	}
+
+	if rInfo.IsDir() {
+		if err := dst.MkdirAll(target, fs.ModePerm); err != nil {
+			return err
+		}
+		if err := chmod(); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if !rInfo.Mode().IsRegular() {
+		switch opt.handleNonRegularFile {
+		case nonRegularFileHandlingError: // default
+			return fmt.Errorf("%w: non regular file is not supported.", ErrBadInput)
+		case nonRegularFileHandlingIgnore:
+			return nil
+			// case nonRegularFileHandlingTrySymlink:
+		}
+	}
+
+	w, err := dst.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fs.ModePerm)
+	if err != nil {
+		return err
+	}
+	closeWOnce := once(w.Close)
+	defer func() { _ = closeWOnce() }()
+
+	err = chmod()
+	if err != nil {
+		return err
+	}
+
+	if n, err := io.CopyBuffer(w, r, *buf); err != nil {
+		return fmt.Errorf("copying %s, %w at %d", path, err, n)
+	}
+
+	if err := closeROnce(); err != nil {
+		return err
+	}
+
+	if err := w.Sync(); err != nil {
+		return err
+	}
+
+	if err := closeWOnce(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// once wraps fn so that it would only be called once.
+// It is a goroutine unsafe version of sync.OnceValue.
+// It also omits panic-propagation feature,
+// since panic is assumed not to be recovered by callers themselves.
 func once[T any](fn func() T) func() T {
 	called := false
 	var result T
