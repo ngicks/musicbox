@@ -20,7 +20,6 @@ const (
 )
 
 type copyFsOption struct {
-	// ignores non regular files instead of instant error.
 	handleNonRegularFile nonRegularFileHandling
 	chmodIf              func(path string) (perm fs.FileMode, ok bool)
 	noChmod              bool
@@ -59,7 +58,7 @@ func CopyFsWithOverridePermission(chmodIf func(path string) (perm fs.FileMode, o
 // The default behavior of CopyFS is:
 //   - returns an error if src contains non regular files
 //   - copies permission bits
-//   - makes directories with fs.ModePerm (o0777) before umask.
+//   - makes directories with fs.ModePerm (0o777) before umask.
 func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	// in case that the file type of dst does not implement io.ReaderFrom or
 	// the file type of src does not implement io.WriterTo.
@@ -87,6 +86,7 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 	return nil
 }
 
+// CopyFsPath copies contents of src specified by paths into dst.
 func CopyFsPath(dst afero.Fs, src fs.FS, paths []string, opts ...CopyFsOption) error {
 	buf := getBuf()
 	defer putBuf(buf)
@@ -146,7 +146,7 @@ func copyPath(dst afero.Fs, src fs.FS, path string, opt copyFsOption, buf *[]byt
 		if ok || !opt.noChmod {
 			err = dst.Chmod(target, perm)
 			if err != nil {
-				return fmt.Errorf("failed to chmod created dir, targ = %s, err = %w", target, err)
+				return fmt.Errorf("failed to chmod created dir, target = %s, err = %w", target, err)
 			}
 		}
 		return nil

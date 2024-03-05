@@ -54,7 +54,7 @@ type EqualReport struct {
 //
 // Equal takes also CopyFsOption. Options work as if dst was dst of CopyFs.
 // That is, for example, if CopyFsWithOverridePermission is set,
-// Equal compares dst's file's mode against returned value of chmodIf instead of src's.
+// Equal compares dst's file mode against returned value of chmodIf instead of src's.
 //
 // Note that mode bits of the root directory is ignored since often it is not controlled.
 //
