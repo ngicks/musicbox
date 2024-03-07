@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/ngicks/musicbox/fsutil"
@@ -136,7 +137,14 @@ func (s *splitter) Next() (r io.Reader, ok bool) {
 	return io.LimitReader(io.MultiReader(bytes.NewReader(buf), s.r), int64(s.size)), true
 }
 
+// PathModifierAppendIndex appends path with "_" + i.
+// i will be padded with "0" to be 3 digits.
+// If i > 999 or i < -99, number will be 4 digits or 3 digits with minus sign.
+//
+// PathModifierAppendIndex removes filepath.Separator from tail
+// if path is suffixed with it.
 func PathModifierAppendIndex(path string, i int) string {
+	path, _ = strings.CutSuffix(path, string(filepath.Separator))
 	return fmt.Sprintf("%s_%03d", path, i)
 }
 
