@@ -31,6 +31,8 @@ func TestSplitter(t *testing.T) {
 			t.Run(fmt.Sprintf("%s,%d", name, size), func(t *testing.T) {
 				splitter := SplitReader(b, size)
 
+				assert.Assert(t, splitter.Size() == int(size))
+
 				var buf bytes.Buffer
 				for {
 					r, ok := splitter.Next()

@@ -62,14 +62,14 @@ func PrepareHandle[S, H any](base afero.Fs, pathSet S, initialContents any) (H, 
 
 }
 
-func isEmpty(s string) bool {
-	// filepath.Clean converts "" to "."
-	return s == "" || s == "."
-}
+// func isEmpty(s string) bool {
+// 	// filepath.Clean converts "" to "."
+// 	return s == "" || s == "."
+// }
 
-func newNotLocalErr(name, path string) error {
-	return fmt.Errorf("%w: %s is not a local path, path = %s", ErrInvalidInput, name, path)
-}
+// func newNotLocalErr(name, path string) error {
+// 	return fmt.Errorf("%w: %s is not a local path, path = %s", ErrInvalidInput, name, path)
+// }
 
 func ValidatePrepareInput(pathSet, pathHandle any) error {
 	return validPrepareInput(reflect.ValueOf(pathSet), reflect.ValueOf(pathHandle))
