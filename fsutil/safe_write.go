@@ -312,6 +312,7 @@ func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 	if !isEmpty(tmpDir) {
 		root = tmpDir
 	}
+	root = filepath.ToSlash(root)
 
 	return fs.WalkDir(afero.NewIOFS(fsys), root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -325,8 +326,10 @@ func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 			return nil
 		}
 
-		if o.matchTmpFile(path) {
-			return fsys.RemoveAll(path)
+		target := filepath.FromSlash(path)
+
+		if o.matchTmpFile(target) {
+			return fsys.RemoveAll(target)
 		}
 		return nil
 	})
