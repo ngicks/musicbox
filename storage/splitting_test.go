@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"crypto/rand"
 	_ "embed"
 	"fmt"
 	"io"
@@ -10,8 +11,16 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-//go:embed testdata/random_bytes
 var randomBytes []byte
+
+func init() {
+	var buf bytes.Buffer
+	_, err := io.CopyN(&buf, rand.Reader, 31000)
+	if err != nil {
+		panic(err)
+	}
+	randomBytes = buf.Bytes()
+}
 
 func TestSplitter(t *testing.T) {
 	for _, size := range []uint{
