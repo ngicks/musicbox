@@ -10,7 +10,7 @@ import (
 
 	"github.com/ngicks/musicbox/fsutil"
 	"github.com/spf13/afero"
-	"gotest.tools/assert"
+	"gotest.tools/v3/assert"
 )
 
 func TestCopyContents_validCopyContentsInput(t *testing.T) {
