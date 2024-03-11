@@ -421,7 +421,7 @@ func (o SafeWriteOption) safeWrite(
 	dst string,
 	perm fs.FileMode,
 	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error),
-	copyTo func(dst afero.File) error,
+	copyTo func(dst afero.File, tmpFilename string) error,
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
 	// always slash.
@@ -468,7 +468,7 @@ func (o SafeWriteOption) safeWrite(
 		}
 	}
 
-	err = copyTo(f)
+	err = copyTo(f, tmpName)
 	if err != nil {
 		return fmt.Errorf("SafeWrite, copy: %w", err)
 	}
@@ -552,7 +552,7 @@ func (o SafeWriteOption) SafeWrite(
 		path,
 		perm,
 		o.tmpFileOption.openTmp,
-		func(dst afero.File) error {
+		func(dst afero.File, _ string) error {
 			b := getBuf()
 			defer putBuf(b)
 			_, err := io.CopyBuffer(dst, r, *b)
@@ -583,8 +583,8 @@ func (o SafeWriteOption) SafeWriteFs(
 		dir,
 		perm,
 		o.tmpFileOption.openTmpDir,
-		func(dst afero.File) error {
-			return CopyFS(afero.NewBasePathFs(fsys, dst.Name()), src, o.copyFsOptions...)
+		func(dst afero.File, tmpFilename string) error {
+			return CopyFS(afero.NewBasePathFs(fsys, tmpFilename), src, o.copyFsOptions...)
 		},
 		postProcesses...,
 	)
