@@ -704,14 +704,14 @@ func randomUint32Padded() string {
 // normalizePath normalizes given p.
 // It always return slash separated and always prefixed with slash if volume name is empty.
 func normalizePath(p string) string {
+	vol := filepath.VolumeName(p)
+	if vol != "" {
+		// absolute path
+		return filepath.Clean(filepath.ToSlash(p))
+	}
 	p = path.Clean(filepath.ToSlash(p))
 	if p == "." {
 		return "/"
 	}
-	vol := filepath.VolumeName(p)
-	if vol != "" {
-		// absolute path
-		return p
-	}
-	return filepath.Clean("/" + strings.TrimPrefix(p, "/"))
+	return path.Clean("/" + strings.TrimPrefix(p, "/"))
 }
