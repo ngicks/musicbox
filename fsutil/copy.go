@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ngicks/musicbox/stream"
 	"github.com/spf13/afero"
 )
 
@@ -23,6 +25,7 @@ type copyFsOption struct {
 	handleNonRegularFile nonRegularFileHandling
 	chmodIf              func(path string) (perm fs.FileMode, ok bool)
 	noChmod              bool
+	ctx                  context.Context
 }
 
 func newCopyFsOption(opts ...CopyFsOption) copyFsOption {
@@ -31,6 +34,13 @@ func newCopyFsOption(opts ...CopyFsOption) copyFsOption {
 		o(&opt)
 	}
 	return opt
+}
+
+func (o copyFsOption) isCancelled() error {
+	if o.ctx != nil && o.ctx.Err() != nil {
+		return o.ctx.Err()
+	}
+	return nil
 }
 
 type CopyFsOption func(o *copyFsOption)
@@ -50,6 +60,12 @@ func CopyFsWithNoChmod(noChmod bool) CopyFsOption {
 func CopyFsWithOverridePermission(chmodIf func(path string) (perm fs.FileMode, ok bool)) CopyFsOption {
 	return func(o *copyFsOption) {
 		o.chmodIf = chmodIf
+	}
+}
+
+func CopyFsWithContext(ctx context.Context) CopyFsOption {
+	return func(o *copyFsOption) {
+		o.ctx = ctx
 	}
 }
 
@@ -77,6 +93,10 @@ func CopyFS(dst afero.Fs, src fs.FS, opts ...CopyFsOption) error {
 			return nil
 		}
 
+		if err := opt.isCancelled(); err != nil {
+			return err
+		}
+
 		return copyPath(dst, src, path, opt, buf)
 	})
 
@@ -94,6 +114,10 @@ func CopyFsPath(dst afero.Fs, src fs.FS, paths []string, opts ...CopyFsOption) e
 	opt := newCopyFsOption(opts...)
 
 	for _, path := range paths {
+		if err := opt.isCancelled(); err != nil {
+			return err
+		}
+
 		target := filepath.Clean(filepath.FromSlash(path))
 		if strings.HasPrefix(target, "..") {
 			return fmt.Errorf("fsutil.CopyFsPath: path is out of src, path = %s: %w", target, fs.ErrNotExist)
@@ -184,7 +208,11 @@ func copyPath(dst afero.Fs, src fs.FS, path string, opt copyFsOption, buf *[]byt
 		return err
 	}
 
-	if n, err := io.CopyBuffer(w, r, *buf); err != nil {
+	var rr io.Reader = r
+	if opt.ctx != nil {
+		rr = stream.NewCancellable(opt.ctx, r)
+	}
+	if n, err := io.CopyBuffer(w, rr, *buf); err != nil {
 		return fmt.Errorf("copying %s, %w at %d", path, err, n)
 	}
 

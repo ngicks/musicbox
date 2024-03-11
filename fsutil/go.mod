@@ -3,6 +3,7 @@ module github.com/ngicks/musicbox/fsutil
 go 1.22.0
 
 require (
+	github.com/ngicks/musicbox/stream v0.0.0-20240310233034-2cafc1fbba1d
 	github.com/spf13/afero v1.11.0
 	gotest.tools/v3 v3.5.1
 )
