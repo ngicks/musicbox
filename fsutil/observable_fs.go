@@ -134,7 +134,7 @@ func (fsys *ObservableFs) Observer() *Observer {
 func (fsys *ObservableFs) Create(name string) (afero.File, error) {
 	f, err := fsys.base.Create(name)
 	fsys.recordFsOp(name, ObservableFsOpNameCreate, nil, err)
-	return newObservableFile(fsys, f, err)
+	return newObservableFile(fsys, normalizePath(name), f, err)
 }
 func (fsys *ObservableFs) Mkdir(name string, perm os.FileMode) error {
 	err := fsys.base.Mkdir(name, perm)
@@ -149,12 +149,12 @@ func (fsys *ObservableFs) MkdirAll(path string, perm os.FileMode) error {
 func (fsys *ObservableFs) Open(name string) (afero.File, error) {
 	f, err := fsys.base.Open(name)
 	fsys.recordFsOp(name, ObservableFsOpNameOpen, nil, err)
-	return newObservableFile(fsys, f, err)
+	return newObservableFile(fsys, normalizePath(name), f, err)
 }
 func (fsys *ObservableFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	f, err := fsys.base.OpenFile(name, flag, perm)
 	fsys.recordFsOp(name, ObservableFsOpNameOpenFile, []any{flag, perm}, err)
-	return newObservableFile(fsys, f, err)
+	return newObservableFile(fsys, normalizePath(name), f, err)
 }
 func (fsys *ObservableFs) Remove(name string) error {
 	err := fsys.base.Remove(name)
@@ -199,21 +199,23 @@ var _ afero.File = (*observableFile)(nil)
 
 type observableFile struct {
 	observer *ObservableFs
+	path     string
 	f        afero.File
 }
 
-func newObservableFile(observer *ObservableFs, f afero.File, err error) (afero.File, error) {
+func newObservableFile(observer *ObservableFs, path string, f afero.File, err error) (afero.File, error) {
 	if err != nil {
 		return nil, err
 	}
 	return &observableFile{
+		path:     path,
 		observer: observer,
 		f:        f,
 	}, nil
 }
 
 func (f *observableFile) record(op ObservableFsFileOpName, args []any, err error) {
-	f.observer.recordFileOp(f.f.Name(), op, args, err)
+	f.observer.recordFileOp(f.path, op, args, err)
 }
 
 func (f *observableFile) Close() error {
