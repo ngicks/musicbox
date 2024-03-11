@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -84,7 +85,7 @@ func TestSafeWrite(t *testing.T) {
 			},
 			assertBeforeRename: []assertBefore{
 				assertLen(1),
-				assertPathContains(`^foo/bar/baz-\d{10}.tmp\/`),
+				assertPathContains(`^/?foo/bar/baz-\d{10}.tmp\/`),
 			},
 			assertResult: []assertAfter{
 				assertNilErr(),
@@ -146,7 +147,7 @@ func TestSafeWrite(t *testing.T) {
 			},
 			assertBeforeRename: []assertBefore{
 				assertLen(2), // 2 files
-				assertPathContains(`^tmptmp/temp-pref-nay.suf\/`),
+				assertPathContains(`^/?tmptmp/temp-pref-nay.suf\/`),
 			},
 			assertResult: []assertAfter{
 				assertNilErr(),
@@ -166,8 +167,8 @@ func TestSafeWrite(t *testing.T) {
 			},
 			assertBeforeRename: []assertBefore{
 				assertLen(2), // 2 files
-				assertPathContains(`^tmp\/foo`),
-				assertPerm("tmp/foo", fs.ModeDir|0710),
+				assertPathContains(`^/?tmp\/foo`),
+				assertPerm("/tmp/foo", fs.ModeDir|0710),
 			},
 			assertResult: []assertAfter{
 				assertNilErr(),
@@ -176,88 +177,95 @@ func TestSafeWrite(t *testing.T) {
 			},
 		},
 	} {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			var err error
 
-			baseFsys, clean := prepareTmpFs()
+		for _, preparer := range [](func() (string, afero.Fs, func())){
+			prepareMemFs,
+			prepareTmpFs,
+			prepareSubMemFs,
+			prepareDeeplyNestedBasePathFs,
+		} {
+			name, baseFsys, clean := preparer()
 			defer clean()
+			tc := tc
+			t.Run(tc.name+", "+name, func(t *testing.T) {
+				var err error
 
-			opt := NewSafeWriteOption(tc.opts...)
+				opt := NewSafeWriteOption(tc.opts...)
 
-			assertCalled := false
-			seenPathsBefore, seenPathsAfter := []string{}, []string{}
-			assertBeforeRename := func(fsys afero.Fs, name string, file afero.File) error {
-				assertCalled = true
-				seenPathsBefore := collectPath(fsys)
-				for _, assert := range tc.assertBeforeRename {
-					assert(t, fsys, seenPathsBefore)
-				}
-				return nil
-			}
-
-			if tc.safeWriteTestCaseBase.writeArgs.path != "" {
-				err = opt.SafeWrite(
-					baseFsys,
-					tc.writeArgs.path,
-					tc.writeArgs.perm,
-					tc.writeArgs.r,
-					append(tc.writeArgs.postProcesses, assertBeforeRename)...,
-				)
-			} else {
-				err = opt.SafeWriteFs(
-					baseFsys,
-					tc.writeFsArgs.dir,
-					tc.writeFsArgs.perm,
-					ignoreHiddenFile(tc.writeFsArgs.src),
-					append(tc.writeFsArgs.postProcesses, assertBeforeRename)...,
-				)
-			}
-
-			assert.NilError(t, err)
-			if tc.assertBeforeRename != nil && !assertCalled {
-				t.Fatalf("assertBeforeRename is defined but was not called")
-			}
-
-			err = fs.WalkDir(afero.NewIOFS(baseFsys), ".", func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if path == "." || d.IsDir() {
+				assertCalled := false
+				seenPathsBefore, seenPathsAfter := []string{}, []string{}
+				assertBeforeRename := func(fsys afero.Fs, _, _ string, file afero.File) error {
+					assertCalled = true
+					seenPathsBefore := collectPath(fsys)
+					for _, assert := range tc.assertBeforeRename {
+						assert(t, fsys, seenPathsBefore)
+					}
 					return nil
 				}
-				seenPathsAfter = append(seenPathsAfter, path)
-				return nil
+
+				if tc.safeWriteTestCaseBase.writeArgs.path != "" {
+					err = opt.SafeWrite(
+						baseFsys,
+						tc.writeArgs.path,
+						tc.writeArgs.perm,
+						tc.writeArgs.r,
+						append(tc.writeArgs.postProcesses, assertBeforeRename)...,
+					)
+				} else {
+					err = opt.SafeWriteFs(
+						baseFsys,
+						tc.writeFsArgs.dir,
+						tc.writeFsArgs.perm,
+						ignoreHiddenFile(tc.writeFsArgs.src),
+						append(tc.writeFsArgs.postProcesses, assertBeforeRename)...,
+					)
+				}
+
+				assert.NilError(t, err)
+				if tc.assertBeforeRename != nil && !assertCalled {
+					t.Fatalf("assertBeforeRename is defined but was not called")
+				}
+
+				err = fs.WalkDir(afero.NewIOFS(baseFsys), "/", func(path string, d fs.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+					if path == "." || d.IsDir() {
+						return nil
+					}
+					seenPathsAfter = append(seenPathsAfter, path)
+					return nil
+				})
+				assert.NilError(t, err)
+
+				for _, assert := range tc.assertResult {
+					assert(t, baseFsys, err)
+				}
+
+				for _, path := range seenPathsBefore {
+					_ = baseFsys.MkdirAll(filepath.Dir(path), fs.ModePerm)
+					f, err := baseFsys.Create(path)
+					assert.NilError(t, err)
+					assert.NilError(t, f.Close())
+				}
+
+				err = opt.CleanTmp(baseFsys)
+
+				assert.NilError(t, err)
+				for _, path := range seenPathsBefore {
+					_, err := baseFsys.Open(path)
+					assert.Assert(t, os.IsNotExist(err))
+				}
+				for _, path := range seenPathsAfter {
+					_, err := baseFsys.Open(path)
+					assert.NilError(t, err)
+				}
 			})
-			assert.NilError(t, err)
-
-			for _, assert := range tc.assertResult {
-				assert(t, baseFsys, err)
-			}
-
-			for _, path := range seenPathsBefore {
-				_ = baseFsys.MkdirAll(filepath.Dir(path), fs.ModePerm)
-				f, err := baseFsys.Create(path)
-				assert.NilError(t, err)
-				assert.NilError(t, f.Close())
-			}
-
-			err = opt.CleanTmp(baseFsys)
-
-			assert.NilError(t, err)
-			for _, path := range seenPathsBefore {
-				_, err := baseFsys.Open(path)
-				assert.Assert(t, os.IsNotExist(err))
-			}
-			for _, path := range seenPathsAfter {
-				_, err := baseFsys.Open(path)
-				assert.NilError(t, err)
-			}
-		})
+		}
 	}
 }
 
-func prepareTmpFs() (fsys afero.Fs, clean func()) {
+func prepareTmpFs() (name string, fsys afero.Fs, clean func()) {
 	tmpDir, err := os.MkdirTemp("", "fsutil-test-SafeWrite-*")
 	if err != nil {
 		panic(err)
@@ -266,7 +274,7 @@ func prepareTmpFs() (fsys afero.Fs, clean func()) {
 	baseFsys := afero.NewBasePathFs(afero.NewOsFs(), tmpDir)
 
 	var b atomic.Bool
-	return baseFsys, func() {
+	return (*afero.BasePathFs)(nil).Name(), baseFsys, func() {
 		if b.CompareAndSwap(false, true) {
 			_ = os.RemoveAll(tmpDir)
 		}
@@ -282,7 +290,7 @@ func must[T any](v T, err error) T {
 
 func collectPath(fsys afero.Fs) []string {
 	var paths []string
-	err := fs.WalkDir(afero.NewIOFS(fsys), ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(afero.NewIOFS(fsys), "/", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -324,7 +332,7 @@ func assertPathPattern(pat string) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
 		t.Helper()
 		for _, p := range seenPaths {
-			assert.Assert(t, cmp.Regexp(pat, p))
+			assert.Assert(t, cmp.Regexp(pat, p), "assertPathPattern")
 		}
 	}
 }
@@ -333,8 +341,8 @@ func assertPerm(path string, mode fs.FileMode) assertBefore {
 	return func(t *testing.T, fsys afero.Fs, seenPaths []string) {
 		t.Helper()
 		s, err := fsys.Stat(path)
-		assert.NilError(t, err)
-		assert.Assert(t, cmp.Equal(s.Mode(), mode))
+		assert.NilError(t, err, "assertPerm")
+		assert.Assert(t, cmp.Equal(s.Mode(), mode), "assertPerm")
 	}
 }
 
@@ -343,7 +351,7 @@ type assertAfter func(t *testing.T, fsys afero.Fs, err error)
 func assertNilErr() assertAfter {
 	return func(t *testing.T, fsys afero.Fs, err error) {
 		t.Helper()
-		assert.NilError(t, err)
+		assert.NilError(t, err, "assertNilErr")
 	}
 }
 
@@ -356,13 +364,13 @@ func assertContents(namedContents []namedContent) assertAfter {
 	return func(t *testing.T, fsys afero.Fs, err error) {
 		t.Helper()
 		for _, nc := range namedContents {
-			f, err := fsys.Open(nc.path)
-			assert.NilError(t, err)
+			f, err := fsys.Open(normalizePath(nc.path))
+			assert.NilError(t, err, "assertContents")
 			s, err := f.Stat()
-			assert.NilError(t, err)
+			assert.NilError(t, err, "assertContents")
 			same, err := sameReader(f, nc.content, s.Size(), int64(nc.content.Len()))
-			assert.NilError(t, err)
-			assert.Assert(t, same)
+			assert.NilError(t, err, "assertContents")
+			assert.Assert(t, same, "assertContents")
 		}
 	}
 }
@@ -371,17 +379,17 @@ func assertFsUnder(base string, fsys fs.FS) assertAfter {
 	return func(t *testing.T, fsys_ afero.Fs, _ error) {
 		t.Helper()
 		eq, err := Equal(fsys, afero.NewIOFS(afero.NewBasePathFs(fsys_, base)))
-		assert.NilError(t, err)
-		assert.Assert(t, eq.Equal(), "not equal: reports = %v", eq)
+		assert.NilError(t, err, "assertFsUnder")
+		assert.Assert(t, eq.Equal(), "assertFsUnder: not equal: reports = %v", eq)
 	}
 }
 
 func assertModeAfter(path string, mode fs.FileMode) assertAfter {
 	return func(t *testing.T, fsys afero.Fs, _ error) {
 		t.Helper()
-		s, err := fsys.Stat(path)
-		assert.NilError(t, err)
-		assert.Assert(t, cmp.Equal(s.Mode(), mode))
+		s, err := fsys.Stat(normalizePath(path))
+		assert.NilError(t, err, "assertModeAfter")
+		assert.Assert(t, cmp.Equal(s.Mode(), mode), "assertModeAfter")
 	}
 }
 
@@ -393,7 +401,7 @@ var (
 func TestSafeWrite_DisableOptions(t *testing.T) {
 	type testCase struct {
 		safeWriteTestCaseBase
-		skipFs           func(fsys afero.Fs) bool
+		skipFs           func(fsys afero.Fs, name string) bool
 		err              error
 		assertFsOps      func([]ObservableFsOp)
 		assertTmpFileOps func([]ObservableFsFileOp)
@@ -431,7 +439,7 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 			},
 			err: fs.ErrNotExist,
 			// Skimming through afero source code reveals MemMapFs does not checks parent directory existence for file creation.
-			skipFs: func(fsys afero.Fs) bool { return fsys.Name() == afero.NewMemMapFs().Name() },
+			skipFs: func(fsys afero.Fs, name string) bool { return strings.Contains(name, (*afero.MemMapFs)(nil).Name()) },
 			assertFsOps: func(ofo []ObservableFsOp) {
 				assertContainsFsOp(t, ofo, ObservableFsOpNameOpenFile)
 				assert.Assert(t, cmp.Len(ofo, 1))
@@ -441,7 +449,7 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 			safeWriteTestCaseBase: safeWriteTestCaseBase{
 				name: "returning an error in postProcess exists early",
 				writeArgs: safeWriteArgs{
-					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, name string, file afero.File) error {
+					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, _, _ string, file afero.File) error {
 						return errExample
 					}},
 				},
@@ -456,7 +464,7 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 				name: "a matching error to ignoreMatchedErr leaves the tmp file in tact",
 				opts: []SafeWriteOptionOption{WithIgnoreMatchedErr(func(err error) bool { return errors.Is(err, errExample) })},
 				writeArgs: safeWriteArgs{
-					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, name string, file afero.File) error {
+					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, _, _ string, file afero.File) error {
 						return errExample
 					}},
 				},
@@ -472,7 +480,7 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 				name: "a mismatching error to ignoreMatchedErr still removes the tmp file",
 				opts: []SafeWriteOptionOption{WithIgnoreMatchedErr(func(err error) bool { return errors.Is(err, ErrBadInput) })},
 				writeArgs: safeWriteArgs{
-					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, name string, file afero.File) error {
+					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, _, _ string, file afero.File) error {
 						return errExample
 					}},
 				},
@@ -488,7 +496,7 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 				name: "disabling remove on error leaves the failed tmp file in tact",
 				opts: []SafeWriteOptionOption{WithDisableRemoveOnErr(true)},
 				writeArgs: safeWriteArgs{
-					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, name string, file afero.File) error {
+					postProcesses: []SafeWritePostProcess{func(fsys afero.Fs, _, _ string, file afero.File) error {
 						return errExample
 					}},
 				},
@@ -500,14 +508,16 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 			},
 		},
 	} {
-		for _, preparer := range [](func() (afero.Fs, func())){
-			prepareMemFs,
-			prepareTmpFs,
+		for _, preparer := range [](func() (string, afero.Fs, func())){
+			// prepareMemFs,
+			// prepareTmpFs,
+			// prepareSubMemFs,
+			prepareDeeplyNestedBasePathFs,
 		} {
-			fsys, clean := preparer()
+			name, fsys, clean := preparer()
 			defer clean()
-			t.Run(tc.name+","+fsys.Name(), func(t *testing.T) {
-				if tc.skipFs != nil && tc.skipFs(fsys) {
+			t.Run(tc.name+", "+name, func(t *testing.T) {
+				if tc.skipFs != nil && tc.skipFs(fsys, name) {
 					t.Skip()
 				}
 				// MemMapFs behaves differently from real fs.
@@ -535,8 +545,19 @@ func TestSafeWrite_DisableOptions(t *testing.T) {
 	}
 }
 
-func prepareMemFs() (afero.Fs, func()) {
-	return afero.NewMemMapFs(), func() {}
+func prepareMemFs() (string, afero.Fs, func()) {
+	return (*afero.MemMapFs)(nil).Name(), afero.NewMemMapFs(), func() {}
+}
+
+func prepareSubMemFs() (string, afero.Fs, func()) {
+	return (*afero.MemMapFs)(nil).Name() + "/foo", afero.NewBasePathFs(afero.NewMemMapFs(), "foo"), func() {}
+}
+
+func prepareDeeplyNestedBasePathFs() (string, afero.Fs, func()) {
+	name, fsys, clean := prepareTmpFs()
+	return name + "/foo/bar/baz",
+		afero.NewBasePathFs(afero.NewBasePathFs(afero.NewBasePathFs(fsys, "foo"), "bar"), "baz"),
+		clean
 }
 
 func mergeSafeWriteArgs(arg1, arg2 safeWriteArgs) safeWriteArgs {

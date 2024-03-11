@@ -178,10 +178,10 @@ func PreProcessAssertSizeZero() SafeWritePreProcess {
 	}
 }
 
-type SafeWritePostProcess func(fsys afero.Fs, name string, file afero.File) error
+type SafeWritePostProcess func(fsys afero.Fs, tmpName string, dstName string, file afero.File) error
 
 func PostProcessClose(r io.Closer) SafeWritePostProcess {
-	return func(fsys afero.Fs, name string, file afero.File) error {
+	return func(fsys afero.Fs, _, _ string, file afero.File) error {
 		return r.Close()
 	}
 }
@@ -196,7 +196,7 @@ func TeeHasher(r io.Reader, h hash.Hash, expected []byte) (piped io.Reader, vali
 }
 
 func PostProcessValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProcess {
-	return func(_ afero.Fs, _ string, _ afero.File) error {
+	return func(_ afero.Fs, _, _ string, _ afero.File) error {
 		actual := h.Sum(nil)
 		if bytes.Equal(expected, actual) {
 			return nil
@@ -307,12 +307,12 @@ func (o tmpFileOption) matchTmpFile(path string) bool {
 }
 
 func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
-	root := "."
+	root := "/"
 	tmpDir := filepath.Clean(o.tmpDirName)
 	if !isEmpty(tmpDir) {
 		root = tmpDir
 	}
-	root = filepath.ToSlash(root)
+	root = normalizePath(root)
 
 	return fs.WalkDir(afero.NewIOFS(fsys), root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -425,7 +425,7 @@ func (o SafeWriteOption) safeWrite(
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
 	// always slash.
-	dst = normalizePath(filepath.FromSlash(dst))
+	dst = filepath.FromSlash(normalizePath(dst))
 
 	if !o.disableMkdir {
 		err = mkdirAll(fsys, o.tempDir(dst), fs.ModePerm)
@@ -492,13 +492,13 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	for _, pp := range postProcesses {
-		err = pp(fsys, tmpName, f)
+		err = pp(fsys, tmpName, dst, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
 	}
 	for _, pp := range o.defaultPostProcesses {
-		err = pp(fsys, tmpName, f)
+		err = pp(fsys, tmpName, dst, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
@@ -584,7 +584,7 @@ func (o SafeWriteOption) SafeWriteFs(
 		perm,
 		o.tmpFileOption.openTmpDir,
 		func(dst afero.File, tmpFilename string) error {
-			return CopyFS(afero.NewBasePathFs(fsys, tmpFilename), src, o.copyFsOptions...)
+			return CopyFS(afero.NewBasePathFs(fsys, filepath.FromSlash(tmpFilename)), src, o.copyFsOptions...)
 		},
 		postProcesses...,
 	)
