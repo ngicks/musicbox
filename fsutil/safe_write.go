@@ -355,14 +355,14 @@ func (o tmpFileOption) open(
 		openName = o.prefix + name + pat + o.suffixOrDefault()
 		f, err = openRandom(
 			fsys,
-			tmpDir,
+			filepath.FromSlash(tmpDir),
 			openName,
 			perm.Perm(),
 		)
 	} else {
 		openName = o.prefix + name + o.suffixOrDefault()
 		f, err = openFile(
-			path.Join(tmpDir, openName),
+			filepath.FromSlash(path.Join(tmpDir, openName)),
 			os.O_CREATE|os.O_RDWR,
 			perm.Perm(),
 		)
