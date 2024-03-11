@@ -655,7 +655,7 @@ func openRandom(
 	}
 
 	if strings.ContainsFunc(pattern, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
-		return nil, fmt.Errorf("%w: pattern containers path separators", ErrBadPattern)
+		return nil, fmt.Errorf("%w: pattern %q contains path separators", ErrBadPattern, pattern)
 	}
 
 	var prefix, suffix string
