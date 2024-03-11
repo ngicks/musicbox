@@ -3,14 +3,15 @@ package fsutil
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"io/fs"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,7 +40,11 @@ type SafeWriteOptionOption func(o *SafeWriteOption)
 
 func WithTmpDir(tmpDirName string) SafeWriteOptionOption {
 	return func(o *SafeWriteOption) {
-		o.tmpDirName = filepath.FromSlash(tmpDirName)
+		if len(tmpDirName) == 0 {
+			o.tmpDirName = tmpDirName
+		} else {
+			o.tmpDirName = filepath.ToSlash(filepath.Clean(tmpDirName))
+		}
 	}
 }
 
@@ -77,20 +82,20 @@ func WithCopyFsOptions(copyFsOptions []CopyFsOption) SafeWriteOptionOption {
 	}
 }
 
-func validNonPattern(s string, cat string) error {
+func validatePattern(s string, cat string) error {
 	if strings.Contains(s, "*") {
-		return fmt.Errorf("%w: %s contains '*'", ErrBadPattern, cat)
+		return fmt.Errorf("%w: %s %q contains '*'", ErrBadPattern, cat, s)
 	}
 	if strings.ContainsFunc(s, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
 		// always slash.
-		return fmt.Errorf("%w: %s contains path separator '"+string(filepath.Separator)+"'", ErrBadName, cat)
+		return fmt.Errorf("%w: %s %q contains path separator '"+string(filepath.Separator)+"'", ErrBadName, cat, s)
 	}
 	return nil
 }
 
 func WithPrefixSuffix(prefix, suffix string) (SafeWriteOptionOption, error) {
-	errPre := validNonPattern(prefix, "prefix")
-	errSuf := validNonPattern(suffix, "suffix")
+	errPre := validatePattern(prefix, "prefix")
+	errSuf := validatePattern(suffix, "suffix")
 	if errPre != nil || errSuf != nil {
 		return nil, fmt.Errorf("WithPrefixSuffix: prefix err = %w, suffix err = %w", errPre, errSuf)
 	}
@@ -105,7 +110,7 @@ func WithPrefixSuffix(prefix, suffix string) (SafeWriteOptionOption, error) {
 
 func WithRandomPattern(randomPattern string) (SafeWriteOptionOption, error) {
 	if strings.ContainsFunc(randomPattern, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
-		return nil, fmt.Errorf("%w: %s contains path separator '"+string(filepath.Separator)+"'", ErrBadName, randomPattern)
+		return nil, fmt.Errorf("%w: %q contains path separator", ErrBadName, randomPattern)
 	}
 	return func(o *SafeWriteOption) {
 		o.randomPattern = randomPattern
@@ -141,20 +146,9 @@ func WithDisableSync(disableSync bool) SafeWriteOptionOption {
 	}
 }
 
-func ApplyMatching[T ~(func(fsys afero.Fs, name string, file afero.File) error)](pattern *regexp.Regexp, opt T) T {
-	return func(fsys afero.Fs, name string, file afero.File) error {
-		if pattern.MatchString(name) {
-			return opt(fsys, name, file)
-		}
-		return nil
-	}
-}
-
-type SafeWritePreProcess func(fsys afero.Fs, name string, file afero.File) error
-
 // PreProcessSeek seeks given files to offset from whence.
 func PreProcessSeek(offset int64, whence int) SafeWritePreProcess {
-	return func(fsys afero.Fs, name string, file afero.File) error {
+	return func(_ afero.Fs, _, _ string, file afero.File) error {
 		_, err := file.Seek(offset, whence)
 		return err
 	}
@@ -166,19 +160,20 @@ func PreProcessSeekEnd() SafeWritePreProcess {
 }
 
 func PreProcessAssertSizeZero() SafeWritePreProcess {
-	return func(fsys afero.Fs, name string, file afero.File) error {
+	return func(_ afero.Fs, tmpName, _ string, file afero.File) error {
 		s, err := file.Stat()
 		if err != nil {
 			return err
 		}
 		if s.Size() != 0 {
-			return fmt.Errorf("%w: expected the file to be empty but has %d bytes, name = %s", ErrBadInput, s.Size(), name)
+			return fmt.Errorf(
+				"%w: expected the file to be empty but has %d bytes, name = %s",
+				ErrBadInput, s.Size(), filepath.FromSlash(tmpName),
+			)
 		}
 		return nil
 	}
 }
-
-type SafeWritePostProcess func(fsys afero.Fs, tmpName string, dstName string, file afero.File) error
 
 func PostProcessClose(r io.Closer) SafeWritePostProcess {
 	return func(fsys afero.Fs, _, _ string, file afero.File) error {
@@ -207,6 +202,9 @@ func PostProcessValidateCheckSum(h hash.Hash, expected []byte) SafeWritePostProc
 		)
 	}
 }
+
+type SafeWritePreProcess func(fsys afero.Fs, tmpName, dstName string, file afero.File) error
+type SafeWritePostProcess func(fsys afero.Fs, tmpName, dstName string, file afero.File) error
 
 // Should it use builder pattern?
 
@@ -275,11 +273,13 @@ type tmpFileOption struct {
 	randomPattern string
 }
 
-func (o tmpFileOption) tempDir(path string) string {
-	tmpDir := filepath.Clean(o.tmpDirName)
+// tempDir returns o.tmpDirName if non empty,
+// or path.Dir(p) otherwise.
+func (o tmpFileOption) tempDir(p string) string {
+	tmpDir := o.tmpDirName
 	if isEmpty(tmpDir) {
 		// guaranteed to be non empty string
-		tmpDir = filepath.Dir(path)
+		tmpDir = path.Dir(p)
 	}
 	return normalizePath(tmpDir)
 }
@@ -289,17 +289,17 @@ func (o tmpFileOption) suffixOrDefault() string {
 		return o.suffix
 	}
 
-	tmpDir := filepath.Clean(o.tmpDirName)
+	tmpDir := o.tmpDirName
 	if isEmpty(tmpDir) {
 		return ".tmp"
 	}
 	return ""
 }
 
-func (o tmpFileOption) matchTmpFile(path string) bool {
-	tmpDir := filepath.Clean(o.tmpDirName)
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
+func (o tmpFileOption) matchTmpFile(p string) bool {
+	tmpDir := o.tmpDirName
+	dir := normalizePath(path.Dir(p))
+	base := path.Base(p)
 	if !isEmpty(tmpDir) && dir != tmpDir {
 		return false
 	}
@@ -308,15 +308,14 @@ func (o tmpFileOption) matchTmpFile(path string) bool {
 
 func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 	root := "/"
-	tmpDir := filepath.Clean(o.tmpDirName)
+	tmpDir := o.tmpDirName
 	if !isEmpty(tmpDir) {
 		root = tmpDir
 	}
-	root = normalizePath(root)
 
 	return fs.WalkDir(afero.NewIOFS(fsys), root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) && path == root {
+			if errors.Is(err, fs.ErrNotExist) && path == root {
 				// tmp dir does not exist.
 				return fs.SkipAll
 			}
@@ -326,10 +325,8 @@ func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 			return nil
 		}
 
-		target := filepath.FromSlash(path)
-
-		if o.matchTmpFile(target) {
-			return fsys.RemoveAll(target)
+		if o.matchTmpFile(path) {
+			return fsys.RemoveAll(filepath.FromSlash(path))
 		}
 		return nil
 	})
@@ -337,16 +334,16 @@ func (o tmpFileOption) cleanTmp(fsys afero.Fs) error {
 
 func (o tmpFileOption) open(
 	fsys afero.Fs,
-	path string,
+	p string,
 	perm fs.FileMode,
 	openRandom func(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error),
 	openFile func(name string, flag int, perm fs.FileMode) (afero.File, error),
 ) (f afero.File, tmpFilename string, err error) {
-	tmpDir := o.tempDir(path)
+	tmpDir := o.tempDir(p)
 
-	name := filepath.Clean(filepath.Base(path))
+	name := path.Base(p)
 	if isEmpty(name) {
-		return nil, "", fmt.Errorf("%w", ErrBadName)
+		return nil, "", fmt.Errorf("%w: name is empty", ErrBadName)
 	}
 
 	var openName string
@@ -365,7 +362,7 @@ func (o tmpFileOption) open(
 	} else {
 		openName = o.prefix + name + o.suffixOrDefault()
 		f, err = openFile(
-			filepath.Join(tmpDir, openName),
+			path.Join(tmpDir, openName),
 			os.O_CREATE|os.O_RDWR,
 			perm.Perm(),
 		)
@@ -377,7 +374,7 @@ func (o tmpFileOption) open(
 		)
 	}
 
-	return f, filepath.Join(tmpDir, filepath.Base(f.Name())), nil
+	return f, path.Join(tmpDir, filepath.Base(f.Name())), nil
 }
 
 func (o tmpFileOption) openTmp(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error) {
@@ -391,6 +388,7 @@ func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) 
 		perm,
 		MkdirRandom,
 		func(name string, flag int, perm fs.FileMode) (afero.File, error) {
+			name = filepath.FromSlash(name)
 			err := fsys.Mkdir(name, perm|0o300) // writable and executable, since we are creating files under.
 			if err != nil {
 				return nil, err
@@ -401,7 +399,7 @@ func (o tmpFileOption) openTmpDir(fsys afero.Fs, path string, perm fs.FileMode) 
 }
 
 func isEmpty(path string) bool {
-	return path == "" || path == "." || path == string(filepath.Separator)
+	return path == "" || path == "." || path == "/"
 }
 
 // CleanTmp erases all temporal file under fsys.
@@ -418,17 +416,18 @@ func (o SafeWriteOption) CleanTmp(fsys afero.Fs) error {
 
 func (o SafeWriteOption) safeWrite(
 	fsys afero.Fs,
-	dst string,
+	dstName string,
 	perm fs.FileMode,
 	openTmp func(fsys afero.Fs, path string, perm fs.FileMode) (f afero.File, tmpFilename string, err error),
 	copyTo func(dst afero.File, tmpFilename string) error,
 	postProcesses ...SafeWritePostProcess,
 ) (err error) {
-	// always slash.
-	dst = filepath.FromSlash(normalizePath(dst))
+	// internal paths are always slash-separated
+	// filepath.FromSlash is called right before calling afero methods.
+	dstName = normalizePath(dstName)
 
 	if !o.disableMkdir {
-		err = mkdirAll(fsys, o.tempDir(dst), fs.ModePerm)
+		err = mkdirAll(fsys, o.tempDir(dstName), fs.ModePerm)
 		// We do not call chmod for dirs since
 		// it can be invoked by the caller anytime if they wish to.
 		if err != nil {
@@ -436,15 +435,14 @@ func (o SafeWriteOption) safeWrite(
 		}
 	}
 
-	f, tmpName, err := openTmp(fsys, dst, perm.Perm())
+	f, tmpName, err := openTmp(fsys, dstName, perm.Perm())
 	if err != nil {
 		return fmt.Errorf("SafeWrite, %w", err)
 	}
-	tmpName = normalizePath(tmpName)
 
 	// Multiple calls for Close is documented as undefined.
-	// Just simple boolean flag is enough since
-	// the calling goroutine is only the current g.
+	// Just simple boolean flag prevents multiple calling and
+	// is enough since the calling goroutine is only the current g.
 	closeOnce := once(func() error { return f.Close() })
 
 	defer func() {
@@ -458,11 +456,11 @@ func (o SafeWriteOption) safeWrite(
 		if o.disableRemoveOnErr {
 			return
 		}
-		_ = fsys.RemoveAll(tmpName)
+		_ = fsys.RemoveAll(filepath.FromSlash(tmpName))
 	}()
 
 	for _, pp := range o.defaultPreProcess {
-		err = pp(fsys, tmpName, f)
+		err = pp(fsys, tmpName, dstName, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, preprocess: %w", err)
 		}
@@ -474,7 +472,7 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	if o.forcePerm {
-		err = fsys.Chmod(tmpName, perm.Perm()|0o300)
+		err = fsys.Chmod(filepath.FromSlash(tmpName), perm.Perm()|0o300)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, chmod: %w", err)
 		}
@@ -492,13 +490,13 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	for _, pp := range postProcesses {
-		err = pp(fsys, tmpName, dst, f)
+		err = pp(fsys, tmpName, dstName, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
 	}
 	for _, pp := range o.defaultPostProcesses {
-		err = pp(fsys, tmpName, dst, f)
+		err = pp(fsys, tmpName, dstName, f)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, postprocess: %w", err)
 		}
@@ -517,13 +515,13 @@ func (o SafeWriteOption) safeWrite(
 	}
 
 	if !o.disableMkdir {
-		err = mkdirAll(fsys, filepath.Dir(dst), fs.ModePerm)
+		err = mkdirAll(fsys, filepath.Dir(dstName), fs.ModePerm)
 		if err != nil {
 			return fmt.Errorf("SafeWrite, mkdirAll: %w", err)
 		}
 	}
 
-	err = fsys.Rename(tmpName, dst)
+	err = fsys.Rename(filepath.FromSlash(tmpName), filepath.FromSlash(dstName))
 	if err != nil {
 		return fmt.Errorf("SafeWrite, rename: %w", err)
 	}
@@ -592,36 +590,38 @@ func (o SafeWriteOption) SafeWriteFs(
 
 // mkdirAll calls MkdirAll on fsys.
 // If dir is an invalid value ("" || "." || filepath.Separator),
+// It swallows error since some implementation refuses to create root dir.
 func mkdirAll(fsys afero.Fs, dir string, perm fs.FileMode) error {
-	// Some implementation might refuses to make "."
-	// Implementations might also refuse other empty paths.
-	// We are avoiding calling Mkdir on them.
-	if emptyDir(dir) {
-		return nil
-	}
 	perm = perm.Perm()
 	if perm == 0 {
 		perm = fs.ModePerm // 0o777
 	}
-	err := fsys.MkdirAll(dir, perm)
+	err := fsys.MkdirAll(filepath.FromSlash(dir), perm)
 	if err != nil {
+		// Some implementation might refuse to make "."
+		// Implementations might also refuse other empty paths.
+		// We'd prefer avoid returning the error if so.
+		if isEmptyDir(dir) {
+			err = nil
+		}
 		return err
 	}
 	return nil
 }
 
-func emptyDir(dir string) bool {
-	return dir == "" || dir == "." || dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator)
+func isEmptyDir(dir string) bool {
+	return dir == "" || dir == "." || dir == "/" ||
+		dir == string(filepath.Separator) || dir == filepath.VolumeName(dir)+string(filepath.Separator)
 }
 
 func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error) {
 	return openRandom(
 		fsys,
-		dir,
+		filepath.ToSlash(dir), // always slash-separated internally
 		pattern,
 		perm,
 		func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error) {
-			return fsys.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm|0o200) // at least writable
+			return fsys.OpenFile(filepath.FromSlash(name), os.O_RDWR|os.O_CREATE|os.O_EXCL, perm|0o200) // at least writable
 		},
 	)
 }
@@ -629,10 +629,11 @@ func OpenFileRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode)
 func MkdirRandom(fsys afero.Fs, dir string, pattern string, perm fs.FileMode) (afero.File, error) {
 	return openRandom(
 		fsys,
-		dir,
+		filepath.ToSlash(dir),
 		pattern,
 		perm,
 		func(fsys afero.Fs, name string, perm fs.FileMode) (afero.File, error) {
+			name = filepath.FromSlash(name)
 			err := fsys.Mkdir(name, perm)
 			if err != nil {
 				return nil, err
@@ -653,7 +654,7 @@ func openRandom(
 		dir = "tmp"
 	}
 
-	if strings.Contains(pattern, string(filepath.Separator)) {
+	if strings.ContainsFunc(pattern, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
 		return nil, fmt.Errorf("%w: pattern containers path separators", ErrBadPattern)
 	}
 
@@ -667,7 +668,7 @@ func openRandom(
 	attempt := 0
 	for {
 		random := randomUint32Padded()
-		name := filepath.Join(dir, prefix+random+suffix)
+		name := path.Join(dir, prefix+random+suffix)
 		f, err := open(fsys, name, perm.Perm())
 		if err == nil {
 			return f, nil
@@ -679,7 +680,7 @@ func openRandom(
 			} else {
 				return nil, fmt.Errorf(
 					"%w: max retry exceeded while opening %s",
-					ErrMaxRetry, filepath.Join(dir, prefix+"*"+suffix),
+					ErrMaxRetry, path.Join(dir, prefix+"*"+suffix),
 				)
 			}
 		} else {
@@ -700,15 +701,17 @@ func randomUint32Padded() string {
 	return builder.String()
 }
 
+// normalizePath normalizes given p.
+// It always return slash separated and always prefixed with slash if volume name is empty.
 func normalizePath(p string) string {
-	p = filepath.ToSlash(filepath.Clean(p))
+	p = path.Clean(filepath.ToSlash(p))
 	if p == "." {
-		return string(filepath.Separator)
+		return "/"
 	}
 	vol := filepath.VolumeName(p)
 	if vol != "" {
 		// absolute path
 		return p
 	}
-	return string(filepath.Separator) + strings.TrimPrefix(p, string(filepath.Separator))
+	return filepath.Clean("/" + strings.TrimPrefix(p, "/"))
 }
