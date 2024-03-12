@@ -29,10 +29,10 @@ func NewMultiError(errs []error) error {
 	return multiErr
 }
 
-// NewMultiErrorNoCheck wraps multiple error.
-// Unlike NewMultiError, NewMultiErrorNoCheck returns non nil error
+// NewMultiErrorUnchecked wraps multiple error.
+// Unlike NewMultiError, NewMultiErrorUnchecked returns non nil error
 // even if errs do not contains any non nil error.
-func NewMultiErrorNoCheck(errs []error) error {
+func NewMultiErrorUnchecked(errs []error) error {
 	return multiError(errs)
 }
 

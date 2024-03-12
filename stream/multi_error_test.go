@@ -16,7 +16,7 @@ func TestMultiError(t *testing.T) {
 		nil,
 	} {
 		assert.NilError(t, NewMultiError(errs))
-		assert.Assert(t, NewMultiErrorNoCheck(errs) != nil)
+		assert.Assert(t, NewMultiErrorUnchecked(errs) != nil)
 	}
 
 	type testCase struct {
@@ -38,13 +38,13 @@ func TestMultiError(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := NewMultiErrorNoCheck(tc.input)
+			e := NewMultiErrorUnchecked(tc.input)
 			formatted := fmt.Sprintf("%s\n%v\n%+v\n%#v\n%d\n%T\n%9.3f", e, e, e, e, e, e, e)
 			assert.Assert(t, cmp.Equal(formatted, tc.expected))
 		})
 	}
 
-	nilMultiErr := NewMultiErrorNoCheck(nil)
+	nilMultiErr := NewMultiErrorUnchecked(nil)
 	assert.Assert(t, cmp.Equal("MultiError: ", nilMultiErr.Error()))
 }
 
