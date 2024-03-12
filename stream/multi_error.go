@@ -11,6 +11,9 @@ var _ fmt.Formatter = multiError{}
 
 type multiError []error
 
+// NewMultiError filters non nil errors and returns a wrapped error.
+// Any nil error in errs will be ignored.
+// If all errors are nil or len(errs) == 0, NewMultiError returns nil.
 func NewMultiError(errs []error) error {
 	var multiErr multiError
 	for _, err := range errs {
@@ -24,6 +27,13 @@ func NewMultiError(errs []error) error {
 	}
 
 	return multiErr
+}
+
+// NewMultiErrorNoCheck wraps multiple error.
+// Unlike NewMultiError, NewMultiErrorNoCheck returns non nil error
+// even if errs do not contains any non nil error.
+func NewMultiErrorNoCheck(errs []error) error {
+	return multiError(errs)
 }
 
 func (me multiError) str(verb string) string {
@@ -52,6 +62,11 @@ func (me multiError) Unwrap() []error {
 	return me
 }
 
+// Format implements fmt.Formatter.
+// Without format, me is less readable if formatted by fmt.*printf family functions
+// e.g. It prints
+// for %+v: stream.multiError{(*errors.errorString)(0xc00002c300), (*stream.exampleErr)(0xc000102630)}
+// for %#v: [824633901824 824634779184]
 func (me multiError) Format(state fmt.State, verb rune) {
 	var format strings.Builder
 
