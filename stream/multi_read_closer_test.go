@@ -13,42 +13,53 @@ var randomBytes []byte
 
 func init() {
 	var buf bytes.Buffer
-	_, err := io.CopyN(&buf, rand.Reader, (218*1024*1024)-19)
+	// Too large buffer size causes OOM Kill.
+	// Fuzzing uses num of cpu as worker limit.
+	// Say you have 24 logical CPU cores,
+	// fuzzing will use 24 workers.
+	// So it'll allocate bufSize * 24 bytes.
+	// num of core may increase over time.
+	const bufSize = (33 * 1024) - 19
+	_, err := io.CopyN(&buf, rand.Reader, bufSize)
 	if err != nil {
 		panic(err)
 	}
 	randomBytes = buf.Bytes()
 }
 
-func FuzzMultiReadCloser(f *testing.F) {
-	f.Add(1024, 23109, 7697586)
-	f.Fuzz(func(t *testing.T, len1, len2, len3 int) {
-		t.Logf("seed: %d, %d, %d", len1, len2, len3)
-
-		reader := bytes.NewReader(randomBytes)
-		lens := []int{len1, len2, len3}
-		var sizedReaders []SizedReaderAt
-		for i := 0; ; i++ {
-			buf := make([]byte, lens[i%3])
-			n, _ := io.ReadAtLeast(reader, buf, 1)
-			if n <= 0 {
-				break
-			}
-			sizedReaders = append(sizedReaders, SizedReaderAt{
-				R:    bytes.NewReader(buf[:n]),
-				Size: int64(n),
-			})
+func prepareReader(b []byte, lens []int) []SizedReaderAt {
+	reader := bytes.NewReader(b)
+	var sizedReaders []SizedReaderAt
+	for i := 0; ; i++ {
+		buf := make([]byte, lens[i%len(lens)])
+		n, _ := io.ReadAtLeast(reader, buf, 1)
+		if n <= 0 {
+			break
 		}
+		sizedReaders = append(sizedReaders, SizedReaderAt{
+			R:    bytes.NewReader(buf[:n]),
+			Size: int64(n),
+		})
+	}
+	return sizedReaders
+}
 
-		r := NewMultiReadAtCloser(sizedReaders)
+type onlyWrite struct {
+	w io.Writer
+}
 
-		dst, err := io.ReadAll(r)
-		if err != nil {
-			panic(err)
-		}
+func (h onlyWrite) Write(p []byte) (n int, err error) {
+	return h.w.Write(p)
+}
 
-		assert.Assert(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
-		assert.Assert(t, bytes.Equal(randomBytes, dst))
-	})
-
+func TestMultiReadCloser(t *testing.T) {
+	r := NewMultiReadAtCloser(prepareReader(randomBytes, []int{1024}))
+	var out bytes.Buffer
+	buf := make([]byte, 1024)
+	// prevent efficient methods like ReadFrom from being used.
+	// Force it to be on boundary.
+	_, err := io.CopyBuffer(onlyWrite{&out}, r, buf)
+	assert.NilError(t, err)
+	assert.Assert(t, len(randomBytes) == out.Len(), "src len = %d, dst len = %d", len(randomBytes), out.Len())
+	assert.Assert(t, bytes.Equal(randomBytes, out.Bytes()))
 }
