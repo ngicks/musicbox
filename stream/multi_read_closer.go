@@ -133,7 +133,11 @@ func (r *multiReadAtCloser) ReadAt(p []byte, off int64) (n int, err error) {
 			cur += rr.Size
 			continue
 		}
-		return rr.R.ReadAt(p, off-cur)
+		n, err := rr.R.ReadAt(p, off-cur)
+		if err == io.EOF && len(r.r) > r.idx {
+			err = nil
+		}
+		return n, err
 	}
 	return 0, io.EOF
 }
