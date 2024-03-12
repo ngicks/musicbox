@@ -3,6 +3,7 @@ package stream
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -46,7 +47,25 @@ func TestMultiError(t *testing.T) {
 
 	nilMultiErr := NewMultiErrorUnchecked(nil)
 	assert.Assert(t, cmp.Equal("MultiError: ", nilMultiErr.Error()))
+
+	mult := NewMultiErrorUnchecked([]error{
+		errors.New("foo"),
+		fs.ErrClosed,
+		&exampleErr{"foo", "bar", "baz"},
+		errExample,
+	})
+
+	assert.ErrorIs(t, mult, fs.ErrClosed)
+	var e *exampleErr
+	assert.Assert(t, errors.As(mult, &e))
+	assert.ErrorIs(t, mult, errExample)
+	assert.Assert(t, !errors.Is(mult, errExampleUnknown))
 }
+
+var (
+	errExample        = errors.New("example")
+	errExampleUnknown = errors.New("unknown")
+)
 
 type exampleErr struct {
 	Foo string
