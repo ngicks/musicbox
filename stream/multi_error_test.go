@@ -43,6 +43,9 @@ func TestMultiError(t *testing.T) {
 			assert.Assert(t, cmp.Equal(formatted, tc.expected))
 		})
 	}
+
+	nilMultiErr := NewMultiErrorNoCheck(nil)
+	assert.Assert(t, cmp.Equal("MultiError: ", nilMultiErr.Error()))
 }
 
 type exampleErr struct {
