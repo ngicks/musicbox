@@ -112,14 +112,16 @@ func (r *multiReadAtCloser) Seek(offset int64, whence int) (int64, error) {
 		cur int64
 	)
 	for i, rr = range r.r {
-		if r.off < cur+rr.Size {
-			break
+		if r.off >= cur+rr.Size {
+			cur += rr.Size
+			continue
 		}
-		cur += rr.Size
+		break
 	}
 	r.idx = i
 	r.cur = cur
-	return offset, nil
+
+	return r.off, nil
 }
 
 func (r *multiReadAtCloser) ReadAt(p []byte, off int64) (n int, err error) {
