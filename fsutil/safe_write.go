@@ -707,7 +707,7 @@ func normalizePath(p string) string {
 	vol := filepath.VolumeName(p)
 	if vol != "" {
 		// absolute path
-		return filepath.Clean(filepath.ToSlash(p))
+		return path.Clean(filepath.ToSlash(p))
 	}
 	p = path.Clean(filepath.ToSlash(p))
 	if p == "." {
