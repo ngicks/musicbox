@@ -106,6 +106,13 @@ func (r *multiReadAtCloser) Seek(offset int64, whence int) (int64, error) {
 		return 0, fmt.Errorf("Seek: %w", ErrOffset)
 	}
 	r.off = offset
+
+	if r.off >= r.upperLimit {
+		r.cur = r.upperLimit
+		r.idx = len(r.r)
+		return r.off, nil
+	}
+
 	var (
 		i   int
 		rr  SizedReaderAt
