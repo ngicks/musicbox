@@ -45,7 +45,7 @@ type SizedReaderAt struct {
 
 type readAtCloser interface {
 	io.ReaderAt
-	io.ReadCloser
+	io.ReadSeekCloser
 }
 
 var _ io.ReaderAt = (*multiReadAtCloser)(nil)
