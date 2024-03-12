@@ -1,7 +1,5 @@
 github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
 github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
-github.com/ngicks/musicbox/stream v0.0.0-20240310233001-b862421069c1 h1:sOfgqU4/nBf+NuCRbCEa/l5lvFy8zV0w8A464mq2fPU=
-github.com/ngicks/musicbox/stream v0.0.0-20240310233001-b862421069c1/go.mod h1:tBX1k6soOfOVF39H2n2mhajzwHOVHNzLWSZNNaXQ2g4=
 github.com/ngicks/musicbox/stream v0.0.0-20240310233034-2cafc1fbba1d h1:vhzS1Crsffd/jxRYbvT9oE5z5oxLMfGp0E7NSravWMk=
 github.com/ngicks/musicbox/stream v0.0.0-20240310233034-2cafc1fbba1d/go.mod h1:tBX1k6soOfOVF39H2n2mhajzwHOVHNzLWSZNNaXQ2g4=
 github.com/spf13/afero v1.11.0 h1:WJQKhtpdm3v2IzqG8VMqrr6Rf3UYpEF239Jy9wNepM8=
