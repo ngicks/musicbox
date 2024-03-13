@@ -63,10 +63,13 @@ func (me multiError) Unwrap() []error {
 }
 
 // Format implements fmt.Formatter.
-// Without format, me is less readable if formatted by fmt.*printf family functions
+// Without Format, me is less readable when printed through fmt.*printf family functions.
 // e.g. It prints
-// for %+v: stream.multiError{(*errors.errorString)(0xc00002c300), (*stream.exampleErr)(0xc000102630)}
-// for %#v: [824633901824 824634779184]
+// (%+v) MultiError: errors, exampleErr: Foo=foo Bar=bar Baz=baz
+// (%#v) MultiError: &errors.errorString{s:"errors"}, &mymodule.exampleErr{Foo:"foo", Bar:"bar", Baz:"baz"}
+// rather than (w/o Format)
+// (%+v) stream.multiError{(*errors.errorString)(0xc00002c300), (*mymodule.exampleErr)(0xc000102630)}
+// (%#v) [824633901824 824634779184]
 func (me multiError) Format(state fmt.State, verb rune) {
 	var format strings.Builder
 
