@@ -5,7 +5,27 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var bufPool = &sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+func getBuf() *bytes.Buffer {
+	return bufPool.Get().(*bytes.Buffer)
+}
+
+func putBuf(b *bytes.Buffer) {
+	if b.Cap() > 64*1024 {
+		// See https://golang.org/issue/23199
+		return
+	}
+	b.Reset()
+	bufPool.Put(b)
+}
 
 var _ error = multiError{}
 var _ fmt.Formatter = multiError{}
@@ -42,18 +62,19 @@ func (me multiError) str(verb string) string {
 		return "MultiError: "
 	}
 
-	var out bytes.Buffer
+	buf := getBuf()
+	defer putBuf(buf)
 
-	_, _ = out.WriteString("MultiError: ")
+	_, _ = buf.WriteString("MultiError: ")
 
 	for _, e := range me {
-		_, _ = fmt.Fprintf(&out, verb, e)
-		_, _ = out.WriteString(", ")
+		_, _ = fmt.Fprintf(buf, verb, e)
+		_, _ = buf.WriteString(", ")
 	}
 
-	out.Truncate(out.Len() - 2)
+	buf.Truncate(buf.Len() - 2)
 
-	return out.String()
+	return buf.String()
 }
 
 func (me multiError) Error() string {
