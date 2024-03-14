@@ -7,6 +7,10 @@ import (
 	"slices"
 )
 
+var (
+	ErrInvalidSize = errors.New("invalid size")
+)
+
 var _ io.ReadCloser = (*multiReadCloser)(nil)
 
 type multiReadCloser struct {
@@ -77,11 +81,22 @@ func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
 			continue
 		}
 		n, err := rr.R.ReadAt(p, r.off-r.cur)
-		r.idx += i
-		r.off += int64(n)
-		if err == io.EOF && len(r.r) > r.idx {
+
+		if err != nil && err != io.EOF {
+			return n, err
+		}
+
+		switch rem := rr.Size - (r.off - r.cur); {
+		case int64(n) > rem:
+			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
+		case err == io.EOF && n == 0 && rem > 0:
+			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
+		case err == io.EOF && len(r.r) > (r.idx+i):
 			err = nil
 		}
+
+		r.idx += i
+		r.off += int64(n)
 		return n, err
 	}
 	return 0, io.EOF
@@ -138,13 +153,23 @@ func (r *multiReadAtSeekCloser) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 
 	var cur int64
-	for _, rr := range r.r {
+	for i, rr := range r.r {
 		if off >= cur+rr.Size {
 			cur += rr.Size
 			continue
 		}
 		n, err := rr.R.ReadAt(p, off-cur)
-		if err == io.EOF && len(r.r) > r.idx {
+
+		if err != nil && err != io.EOF {
+			return n, err
+		}
+
+		switch rem := rr.Size - (off - cur); {
+		case int64(n) > rem:
+			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
+		case err == io.EOF && n == 0 && rem > 0:
+			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
+		case err == io.EOF && len(r.r) > i:
 			err = nil
 		}
 		return n, err

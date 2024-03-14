@@ -63,3 +63,59 @@ func TestMultiReadAtSeekCloser(t *testing.T) {
 	assert.Assert(t, len(randomBytes) == out.Len(), "src len = %d, dst len = %d", len(randomBytes), out.Len())
 	assert.Assert(t, bytes.Equal(randomBytes, out.Bytes()))
 }
+
+func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
+	type testCase struct {
+		name      string // case name
+		diff      int    // difference between actual read size and alleged in []SizedReaderAt. will be added to index 3.
+		readAtLoc int64  // ReadAt offset where ReadAt return an error specified by err.
+		err       error
+	}
+	for _, tc := range []testCase{
+		{
+			name:      "200bytes_more",
+			diff:      200,
+			readAtLoc: 1024*4 + 100,
+			err:       io.ErrUnexpectedEOF,
+		},
+		{
+			name:      "200bytes_less",
+			diff:      -200,
+			readAtLoc: 1024*3 + 700,
+			err:       ErrInvalidSize,
+		},
+	} {
+		t.Run("Read_"+tc.name, func(t *testing.T) {
+			reader := prepareReader(randomBytes, []int{1024})
+
+			sized := reader[3]
+			sized.Size = sized.Size + int64(tc.diff)
+			reader[3] = sized
+
+			r := NewMultiReadAtSeekCloser(reader)
+			var out bytes.Buffer
+			buf := make([]byte, 1024)
+			// prevent efficient methods like ReadFrom from being used.
+			// Force it to be on boundary.
+			_, err := io.CopyBuffer(onlyWrite{&out}, r, buf)
+			assert.ErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
+			assert.ErrorIs(t, err, tc.err)
+		})
+		t.Run("ReatAt_"+tc.name, func(t *testing.T) {
+			reader := prepareReader(randomBytes, []int{1024})
+
+			sized := reader[3]
+			sized.Size = sized.Size + int64(tc.diff)
+			reader[3] = sized
+
+			r := NewMultiReadAtSeekCloser(reader)
+			buf := make([]byte, 1024)
+			// prevent efficient methods like ReadFrom from being used.
+			// Force it to be on boundary.
+			n, err := r.ReadAt(buf, tc.readAtLoc)
+			t.Logf("ReadAt: %d", n)
+			assert.ErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
+			assert.ErrorIs(t, err, tc.err)
+		})
+	}
+}
