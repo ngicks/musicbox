@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -41,16 +42,17 @@ func (me multiError) str(verb string) string {
 		return "MultiError: "
 	}
 
-	var out strings.Builder
+	var out bytes.Buffer
 
 	_, _ = out.WriteString("MultiError: ")
 
-	for i, e := range me {
-		_, _ = out.WriteString(fmt.Sprintf(verb, e))
-		if i != len(me)-1 {
-			_, _ = out.WriteString(", ")
-		}
+	for _, e := range me {
+		_, _ = fmt.Fprintf(&out, verb, e)
+		_, _ = out.WriteString(", ")
 	}
+
+	out.Truncate(out.Len() - 2)
+
 	return out.String()
 }
 
@@ -63,6 +65,7 @@ func (me multiError) Unwrap() []error {
 }
 
 // Format implements fmt.Formatter.
+// Format propagates given format
 // Without Format, me is less readable when printed through fmt.*printf family functions.
 // e.g. It prints
 // (%+v) MultiError: errors, exampleErr: Foo=foo Bar=bar Baz=baz
