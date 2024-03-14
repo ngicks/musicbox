@@ -43,15 +43,15 @@ type SizedReaderAt struct {
 	Size int64
 }
 
-type readAtCloser interface {
+type readAtSeekCloser interface {
 	io.ReaderAt
 	io.ReadSeekCloser
 }
 
-var _ io.ReaderAt = (*multiReadAtCloser)(nil)
-var _ io.ReadCloser = (*multiReadAtCloser)(nil)
+var _ io.ReaderAt = (*multiReadAtSeekCloser)(nil)
+var _ io.ReadCloser = (*multiReadAtSeekCloser)(nil)
 
-type multiReadAtCloser struct {
+type multiReadAtSeekCloser struct {
 	idx        int
 	cur        int64 // off - cur = offset in current ReaderAt.
 	off        int64 // current offset
@@ -59,18 +59,18 @@ type multiReadAtCloser struct {
 	r          []SizedReaderAt
 }
 
-func NewMultiReadAtCloser(readers []SizedReaderAt) readAtCloser {
+func NewMultiReadAtSeekCloser(readers []SizedReaderAt) readAtSeekCloser {
 	var upperLimit int64
 	for _, rr := range readers {
 		upperLimit += rr.Size
 	}
-	return &multiReadAtCloser{
+	return &multiReadAtSeekCloser{
 		upperLimit: upperLimit,
 		r:          slices.Clone(readers),
 	}
 }
 
-func (r *multiReadAtCloser) Read(p []byte) (int, error) {
+func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
 	for i, rr := range r.r[r.idx:] {
 		if r.off >= r.cur+rr.Size {
 			r.cur += rr.Size
@@ -92,7 +92,7 @@ var (
 	ErrOffset = errors.New("invalid offset")
 )
 
-func (r *multiReadAtCloser) Seek(offset int64, whence int) (int64, error) {
+func (r *multiReadAtSeekCloser) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	default:
 		return 0, fmt.Errorf("Seek: %w = %d", ErrWhence, whence)
@@ -132,7 +132,7 @@ func (r *multiReadAtCloser) Seek(offset int64, whence int) (int64, error) {
 	return r.off, nil
 }
 
-func (r *multiReadAtCloser) ReadAt(p []byte, off int64) (n int, err error) {
+func (r *multiReadAtSeekCloser) ReadAt(p []byte, off int64) (n int, err error) {
 	if off < 0 || off >= r.upperLimit {
 		return 0, io.EOF
 	}
@@ -152,7 +152,7 @@ func (r *multiReadAtCloser) ReadAt(p []byte, off int64) (n int, err error) {
 	return 0, io.EOF
 }
 
-func (r *multiReadAtCloser) Close() error {
+func (r *multiReadAtSeekCloser) Close() error {
 	var errs []error
 	for _, rr := range r.r {
 		if c, ok := rr.R.(io.Closer); ok {

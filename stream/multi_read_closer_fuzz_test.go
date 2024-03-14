@@ -10,14 +10,14 @@ import (
 	"gotest.tools/v3/assert/cmp"
 )
 
-func FuzzMultiReadCloser_Read(f *testing.F) {
+func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
 	f.Add(6602, 23109, 7697586)
 	f.Fuzz(func(t *testing.T, len1, len2, len3 int) {
 		if min(len1, len2, len3) <= 0 { // too small len might cause this test longer.
 			t.Skip()
 		}
 		t.Logf("seed: %d, %d, %d", len1, len2, len3)
-		r := NewMultiReadAtCloser(prepareReader(randomBytes, []int{len1, len2, len3}))
+		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{len1, len2, len3}))
 		dst, err := io.ReadAll(r)
 		assert.NilError(t, err)
 		assert.Assert(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
@@ -25,7 +25,7 @@ func FuzzMultiReadCloser_Read(f *testing.F) {
 	})
 }
 
-func FuzzMultiReadCloser_ReadAt(f *testing.F) {
+func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 	f.Add(1025, 7777, 30787, 0, 255, 6666)
 	f.Fuzz(func(t *testing.T, len1, len2, len3, loc1, loc2, loc3 int) {
 		if min(len1, len2, len3) <= 0 ||
@@ -37,7 +37,7 @@ func FuzzMultiReadCloser_ReadAt(f *testing.F) {
 		lens := []int{len1, len2, len3}
 		locs := [...]int{loc1, loc2, loc3}
 
-		r := NewMultiReadAtCloser(prepareReader(randomBytes, lens))
+		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens))
 		for _, loc := range locs {
 			{
 				bin, err := io.ReadAll(io.NewSectionReader(r, int64(loc), 1024))
@@ -58,7 +58,7 @@ func FuzzMultiReadCloser_ReadAt(f *testing.F) {
 	})
 }
 
-func FuzzMultiReadCloser_Seek(f *testing.F) {
+func FuzzMultiReadAtSeekCloser_Seek(f *testing.F) {
 	f.Add(1025, 7777, 30787, 0, 255, 6666)
 	f.Fuzz(func(t *testing.T, len1, len2, len3, loc1, loc2, loc3 int) {
 		if min(len1, len2, len3) <= 0 || // len must be greater than 0
@@ -91,7 +91,7 @@ func FuzzMultiReadCloser_Seek(f *testing.F) {
 					t.Logf("whence = SeekEnd")
 				}
 
-				mult := NewMultiReadAtCloser(prepareReader(randomBytes, lens))
+				mult := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens))
 				org := bytes.NewReader(randomBytes)
 
 				buf1, buf2 := make([]byte, len1), make([]byte, len1)

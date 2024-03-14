@@ -52,8 +52,8 @@ func (h onlyWrite) Write(p []byte) (n int, err error) {
 	return h.w.Write(p)
 }
 
-func TestMultiReadCloser(t *testing.T) {
-	r := NewMultiReadAtCloser(prepareReader(randomBytes, []int{1024}))
+func TestMultiReadAtSeekCloser(t *testing.T) {
+	r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}))
 	var out bytes.Buffer
 	buf := make([]byte, 1024)
 	// prevent efficient methods like ReadFrom from being used.
