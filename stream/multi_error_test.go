@@ -41,7 +41,7 @@ func TestMultiError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := NewMultiErrorUnchecked(tc.input)
 			formatted := fmt.Sprintf("%s\n%v\n%+v\n%#v\n%d\n%T\n%9.3f", e, e, e, e, e, e, e)
-			assert.Assert(t, cmp.Equal(formatted, tc.expected))
+			assert.Assert(t, cmp.Equal(tc.expected, formatted))
 		})
 	}
 
