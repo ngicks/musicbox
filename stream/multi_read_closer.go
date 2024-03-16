@@ -47,13 +47,12 @@ type SizedReaderAt struct {
 	Size int64
 }
 
-type readAtSeekCloser interface {
+type ReadAtReadSeekCloser interface {
 	io.ReaderAt
 	io.ReadSeekCloser
 }
 
-var _ io.ReaderAt = (*multiReadAtSeekCloser)(nil)
-var _ io.ReadCloser = (*multiReadAtSeekCloser)(nil)
+var _ ReadAtReadSeekCloser = (*multiReadAtSeekCloser)(nil)
 
 type multiReadAtSeekCloser struct {
 	idx        int
@@ -63,7 +62,7 @@ type multiReadAtSeekCloser struct {
 	r          []SizedReaderAt
 }
 
-func NewMultiReadAtSeekCloser(readers []SizedReaderAt) readAtSeekCloser {
+func NewMultiReadAtSeekCloser(readers []SizedReaderAt) ReadAtReadSeekCloser {
 	var upperLimit int64
 	for _, rr := range readers {
 		upperLimit += rr.Size
