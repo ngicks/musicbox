@@ -157,7 +157,32 @@ func (r *multiReadAtSeekCloser) Seek(offset int64, whence int) (int64, error) {
 	return r.off, nil
 }
 
+// ReadAt implements io.ReaderAt.
 func (r *multiReadAtSeekCloser) ReadAt(p []byte, off int64) (n int, err error) {
+	if off < 0 || off >= r.upperLimit {
+		return 0, io.EOF
+	}
+	maxExceeded := false
+	if max := r.upperLimit - off; int64(len(p)) > max {
+		maxExceeded = true
+		p = p[0:max]
+	}
+	for {
+		nn, err := r.readAt(p, off)
+		n += nn
+		off += int64(nn)
+		if nn == len(p) || err != nil {
+			if maxExceeded && err == nil {
+				err = io.EOF
+			}
+			return n, err
+		}
+		p = p[nn:]
+	}
+}
+
+// readAt reads from a single ReaderAt at translated offset.
+func (r *multiReadAtSeekCloser) readAt(p []byte, off int64) (n int, err error) {
 	if off < 0 || off >= r.upperLimit {
 		return 0, io.EOF
 	}
