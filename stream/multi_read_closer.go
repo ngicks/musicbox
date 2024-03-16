@@ -74,6 +74,10 @@ func NewMultiReadAtSeekCloser(readers []SizedReaderAt) ReadAtReadSeekCloser {
 }
 
 func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
+	if r.off >= r.upperLimit {
+		return 0, io.EOF
+	}
+
 	var (
 		i  int
 		rr SizedReaderAt
@@ -83,10 +87,6 @@ func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
 			break
 		}
 		r.cur += rr.Size
-	}
-
-	if r.off >= r.upperLimit {
-		return 0, io.EOF
 	}
 
 	readerOff := r.off - r.cur
