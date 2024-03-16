@@ -75,31 +75,43 @@ func NewMultiReadAtSeekCloser(readers []SizedReaderAt) readAtSeekCloser {
 }
 
 func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
-	for i, rr := range r.r[r.idx:] {
-		if r.off >= r.cur+rr.Size {
-			r.cur += rr.Size
-			continue
+	var (
+		i  int
+		rr SizedReaderAt
+	)
+	for i, rr = range r.r[r.idx:] {
+		if r.off < r.cur+rr.Size {
+			break
 		}
-		n, err := rr.R.ReadAt(p, r.off-r.cur)
+		r.cur += rr.Size
+	}
 
-		if err != nil && err != io.EOF {
-			return n, err
-		}
+	if r.off >= r.upperLimit {
+		return 0, io.EOF
+	}
 
-		switch rem := rr.Size - (r.off - r.cur); {
-		case int64(n) > rem:
-			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
-		case err == io.EOF && n == 0 && rem > 0:
-			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
-		case err == io.EOF && len(r.r) > (r.idx+i):
-			err = nil
-		}
+	readerOff := r.off - r.cur
+	n, err := rr.R.ReadAt(p, readerOff)
 
+	if n > 0 || err == io.EOF {
 		r.idx += i
 		r.off += int64(n)
+	}
+
+	if err != nil && err != io.EOF {
 		return n, err
 	}
-	return 0, io.EOF
+
+	switch rem := rr.Size - readerOff; {
+	case int64(n) > rem:
+		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
+	case err == io.EOF && n == 0 && rem > 0:
+		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
+	case err == io.EOF && len(r.r) > r.idx:
+		err = nil
+	}
+
+	return n, err
 }
 
 var (
@@ -135,11 +147,10 @@ func (r *multiReadAtSeekCloser) Seek(offset int64, whence int) (int64, error) {
 		cur int64
 	)
 	for i, rr = range r.r {
-		if r.off >= cur+rr.Size {
-			cur += rr.Size
-			continue
+		if r.off < cur+rr.Size {
+			break
 		}
-		break
+		cur += rr.Size
 	}
 	r.idx = i
 	r.cur = cur
@@ -152,29 +163,39 @@ func (r *multiReadAtSeekCloser) ReadAt(p []byte, off int64) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	var cur int64
-	for i, rr := range r.r {
-		if off >= cur+rr.Size {
-			cur += rr.Size
-			continue
+	var (
+		i   int
+		rr  SizedReaderAt
+		cur int64
+	)
+	for i, rr = range r.r {
+		if off < cur+rr.Size {
+			break
 		}
-		n, err := rr.R.ReadAt(p, off-cur)
+		cur += rr.Size
+	}
 
-		if err != nil && err != io.EOF {
-			return n, err
-		}
+	if off >= r.upperLimit {
+		return 0, io.EOF
+	}
 
-		switch rem := rr.Size - (off - cur); {
-		case int64(n) > rem:
-			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
-		case err == io.EOF && n == 0 && rem > 0:
-			return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
-		case err == io.EOF && len(r.r) > i:
-			err = nil
-		}
+	readerOff := off - cur
+	n, err = rr.R.ReadAt(p, readerOff)
+
+	if err != nil && err != io.EOF {
 		return n, err
 	}
-	return 0, io.EOF
+
+	switch rem := rr.Size - readerOff; {
+	case int64(n) > rem:
+		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
+	case err == io.EOF && n == 0 && rem > 0:
+		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
+	case err == io.EOF && len(r.r) > i:
+		err = nil
+	}
+	return n, err
+
 }
 
 func (r *multiReadAtSeekCloser) Close() error {
