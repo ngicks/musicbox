@@ -17,7 +17,7 @@ func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
 			t.Skip()
 		}
 		t.Logf("seed: %d, %d, %d", len1, len2, len3)
-		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{len1, len2, len3}))
+		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{len1, len2, len3}, false))
 		dst, err := io.ReadAll(r)
 		assert.NilError(t, err)
 		assert.Assert(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
@@ -37,10 +37,11 @@ func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 		lens := []int{len1, len2, len3}
 		locs := [...]int{loc1, loc2, loc3}
 
-		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens))
+		buf := make([]byte, 1024)
+		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens, false))
 		for _, loc := range locs {
 			{
-				bin, err := io.ReadAll(io.NewSectionReader(r, int64(loc), 1024))
+				n, err := r.ReadAt(buf, int64(loc))
 				assert.NilError(t, err)
 				split := randomBytes[:]
 				if loc >= len(randomBytes) {
@@ -51,8 +52,8 @@ func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 				if len(split) >= 1024 {
 					split = split[:1024]
 				}
-				assert.Assert(t, len(bin) == len(split), "left = %d, right = %d", len(bin), len(split))
-				assert.Assert(t, bytes.Equal(bin, split), "left = %s, right = %s", hex.EncodeToString(bin), hex.EncodeToString(split))
+				assert.Assert(t, n == len(split), "left = %d, right = %d", n, len(split))
+				assert.Assert(t, bytes.Equal(buf, split), "left = %s, right = %s", hex.EncodeToString(buf), hex.EncodeToString(split))
 			}
 		}
 	})
@@ -91,7 +92,7 @@ func FuzzMultiReadAtSeekCloser_Seek(f *testing.F) {
 					t.Logf("whence = SeekEnd")
 				}
 
-				mult := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens))
+				mult := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens, false))
 				org := bytes.NewReader(randomBytes)
 
 				buf1, buf2 := make([]byte, len1), make([]byte, len1)
