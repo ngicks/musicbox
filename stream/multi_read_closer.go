@@ -106,7 +106,7 @@ func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
 		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
 	case err == io.EOF && n == 0 && rem > 0:
 		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
-	case err == io.EOF && len(r.r) > r.idx:
+	case err == io.EOF && len(r.r)-1 > r.idx:
 		err = nil
 	}
 
@@ -215,11 +215,10 @@ func (r *multiReadAtSeekCloser) readAt(p []byte, off int64) (n int, err error) {
 		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", ErrInvalidSize)
 	case err == io.EOF && n == 0 && rem > 0:
 		return n, fmt.Errorf("MultiReadAtSeekCloser.Read: %w", io.ErrUnexpectedEOF)
-	case err == io.EOF && len(r.r) > i:
+	case err == io.EOF && len(r.r)-1 > i:
 		err = nil
 	}
 	return n, err
-
 }
 
 func (r *multiReadAtSeekCloser) Close() error {
