@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"slices"
 )
 
@@ -45,6 +46,46 @@ func (r *multiReadCloser) Close() error {
 type SizedReaderAt struct {
 	R    io.ReaderAt
 	Size int64
+}
+
+type FileLike interface {
+	Stat() (fs.FileInfo, error)
+	io.ReaderAt
+}
+
+// SizedReadersFromFileLike constructs []SizedReaderAt from file like objects.
+// For example, *os.File and afero.File implement FileLike.
+func SizedReadersFromFileLike[T FileLike](files []T) ([]SizedReaderAt, error) {
+	sizedReaders := make([]SizedReaderAt, len(files))
+	for i, f := range files {
+		s, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		sizedReaders[i] = SizedReaderAt{
+			R:    f,
+			Size: s.Size(),
+		}
+	}
+	return sizedReaders, nil
+}
+
+type ReadAtSizer interface {
+	io.ReaderAt
+	Size() int64
+}
+
+// SizedReadersFromReadAtSizer constructs []SizedReaderAt from ReaderAt with Size method.
+// For example, *io.SectionReader implements ReadAtSizer.
+func SizedReadersFromReadAtSizer[T ReadAtSizer](readers []T) []SizedReaderAt {
+	sizedReaders := make([]SizedReaderAt, len(readers))
+	for i, r := range readers {
+		sizedReaders[i] = SizedReaderAt{
+			R:    r,
+			Size: r.Size(),
+		}
+	}
+	return sizedReaders
 }
 
 type sizedReaderAt struct {
