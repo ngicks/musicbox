@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"slices"
+	"sort"
 )
 
 var (
@@ -268,14 +268,14 @@ func search(off int64, readers []sizedReaderAt) int {
 }
 
 func binarySearch(off int64, readers []sizedReaderAt) int {
-	i, found := slices.BinarySearchFunc(readers, off, func(r sizedReaderAt, off int64) int {
+	i, found := sort.Find(len(readers), func(i int) int {
 		switch {
-		case off < r.accum:
-			return 1
-		case r.accum <= off && off < r.accum+r.Size:
+		case off < readers[i].accum:
+			return -1
+		case readers[i].accum <= off && off < readers[i].accum+readers[i].Size:
 			return 0
 		default: // r.accum+r.Size <= off:
-			return -1
+			return 1
 		}
 	})
 	if !found {
