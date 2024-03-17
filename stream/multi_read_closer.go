@@ -12,30 +12,30 @@ var (
 	ErrInvalidSize = errors.New("invalid size")
 )
 
-var _ io.ReadCloser = (*multiReadCloser)(nil)
+var _ io.ReadCloser = (*multiReadCloser[io.ReadCloser])(nil)
 
-type multiReadCloser struct {
+type multiReadCloser[T io.ReadCloser] struct {
 	r       io.Reader
-	closers []io.ReadCloser
+	closers []T
 }
 
-func NewMultiReadCloser(r ...io.ReadCloser) io.ReadCloser {
+func NewMultiReadCloser[T io.ReadCloser](r ...T) io.ReadCloser {
 	var readers []io.Reader
 	for _, rr := range r {
 		readers = append(readers, rr)
 	}
 
-	return &multiReadCloser{
+	return &multiReadCloser[T]{
 		r:       io.MultiReader(readers...),
 		closers: r,
 	}
 }
 
-func (r *multiReadCloser) Read(p []byte) (int, error) {
+func (r *multiReadCloser[T]) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 
-func (r *multiReadCloser) Close() error {
+func (r *multiReadCloser[T]) Close() error {
 	var errs []error
 	for _, c := range r.closers {
 		errs = append(errs, c.Close())
