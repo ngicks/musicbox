@@ -114,8 +114,16 @@ type onlyWrite struct {
 	w io.Writer
 }
 
-func (h onlyWrite) Write(p []byte) (n int, err error) {
-	return h.w.Write(p)
+func (w onlyWrite) Write(p []byte) (n int, err error) {
+	return w.w.Write(p)
+}
+
+type onlyRead struct {
+	r io.Reader
+}
+
+func (r onlyRead) Read(p []byte) (int, error) {
+	return r.r.Read(p)
 }
 
 func useEofReaderAtTestCaseName(b bool) string {
@@ -173,7 +181,7 @@ func TestMultiReadAtSeekCloser_read_all(t *testing.T) {
 			buf := make([]byte, 1024)
 			// prevent efficient methods like ReadFrom from being used.
 			// Force it to be on boundary.
-			_, err := io.CopyBuffer(onlyWrite{&out}, r, buf)
+			_, err := io.CopyBuffer(onlyWrite{&out}, onlyRead{r}, buf)
 			assertNilInterface(t, err)
 			assertBool(t,
 				len(randomBytes) == out.Len(),
