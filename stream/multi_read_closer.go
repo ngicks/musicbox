@@ -47,6 +47,11 @@ type SizedReaderAt struct {
 	Size int64
 }
 
+type sizedReaderAt struct {
+	SizedReaderAt
+	accum int64 // starting offset of this reader from head of readers.
+}
+
 type ReadAtReadSeekCloser interface {
 	io.ReaderAt
 	io.ReadSeekCloser
@@ -55,21 +60,25 @@ type ReadAtReadSeekCloser interface {
 var _ ReadAtReadSeekCloser = (*multiReadAtSeekCloser)(nil)
 
 type multiReadAtSeekCloser struct {
-	idx        int
-	cur        int64 // off - cur = offset in current ReaderAt.
+	idx        int   // idx of current sizedReaderAt which is pointed by off.
 	off        int64 // current offset
 	upperLimit int64 // precomputed upper limit
-	r          []SizedReaderAt
+	r          []sizedReaderAt
 }
 
 func NewMultiReadAtSeekCloser(readers []SizedReaderAt) ReadAtReadSeekCloser {
-	var upperLimit int64
-	for _, rr := range readers {
-		upperLimit += rr.Size
+	translated := make([]sizedReaderAt, len(readers))
+	var accum = int64(0)
+	for i, rr := range readers {
+		translated[i] = sizedReaderAt{
+			SizedReaderAt: rr,
+			accum:         accum,
+		}
+		accum += rr.Size
 	}
 	return &multiReadAtSeekCloser{
-		upperLimit: upperLimit,
-		r:          slices.Clone(readers),
+		upperLimit: accum,
+		r:          translated,
 	}
 }
 
@@ -78,18 +87,10 @@ func (r *multiReadAtSeekCloser) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	var (
-		i  int
-		rr SizedReaderAt
-	)
-	for i, rr = range r.r[r.idx:] {
-		if r.off < r.cur+rr.Size {
-			break
-		}
-		r.cur += rr.Size
-	}
+	i := search(r.off, r.r[r.idx:])
+	rr := r.r[r.idx:][i]
 
-	readerOff := r.off - r.cur
+	readerOff := r.off - rr.accum
 	n, err := rr.R.ReadAt(p, readerOff)
 
 	if n > 0 || err == io.EOF {
@@ -135,24 +136,11 @@ func (r *multiReadAtSeekCloser) Seek(offset int64, whence int) (int64, error) {
 	r.off = offset
 
 	if r.off >= r.upperLimit {
-		r.cur = r.upperLimit
 		r.idx = len(r.r)
 		return r.off, nil
 	}
 
-	var (
-		i   int
-		rr  SizedReaderAt
-		cur int64
-	)
-	for i, rr = range r.r {
-		if r.off < cur+rr.Size {
-			break
-		}
-		cur += rr.Size
-	}
-	r.idx = i
-	r.cur = cur
+	r.idx = search(r.off, r.r)
 
 	return r.off, nil
 }
@@ -187,23 +175,13 @@ func (r *multiReadAtSeekCloser) readAt(p []byte, off int64) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	var (
-		i   int
-		rr  SizedReaderAt
-		cur int64
-	)
-	for i, rr = range r.r {
-		if off < cur+rr.Size {
-			break
-		}
-		cur += rr.Size
-	}
-
-	if off >= r.upperLimit {
+	i := search(off, r.r)
+	if i < 0 {
 		return 0, io.EOF
 	}
 
-	readerOff := off - cur
+	rr := r.r[i]
+	readerOff := off - rr.accum
 	n, err = rr.R.ReadAt(p, readerOff)
 
 	if err != nil && err != io.EOF {
@@ -229,4 +207,38 @@ func (r *multiReadAtSeekCloser) Close() error {
 		}
 	}
 	return NewMultiError(errs)
+}
+
+var searchThreshold int = 32
+
+func search(off int64, readers []sizedReaderAt) int {
+	if len(readers) > searchThreshold {
+		return binarySearch(off, readers)
+	}
+
+	// A simple benchmark has shown that slice look up is faster when readers are not big enough.
+	// The threshold exists between 32 and 64.
+	for i, rr := range readers {
+		if rr.accum <= off && off < rr.accum+rr.Size {
+			return i
+		}
+	}
+	return -1
+}
+
+func binarySearch(off int64, readers []sizedReaderAt) int {
+	i, found := slices.BinarySearchFunc(readers, off, func(r sizedReaderAt, off int64) int {
+		switch {
+		case off < r.accum:
+			return 1
+		case r.accum <= off && off < r.accum+r.Size:
+			return 0
+		default: // r.accum+r.Size <= off:
+			return -1
+		}
+	})
+	if !found {
+		return -1
+	}
+	return i
 }
