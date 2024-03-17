@@ -32,8 +32,7 @@ var _ fmt.Formatter = multiError{}
 
 type multiError []error
 
-// NewMultiError filters non nil errors and returns a wrapped error.
-// Any nil error in errs will be ignored.
+// NewMultiError wraps errors into single error ignoring nil error in errs.
 // If all errors are nil or len(errs) == 0, NewMultiError returns nil.
 func NewMultiError(errs []error) error {
 	var multiErr multiError
@@ -50,9 +49,9 @@ func NewMultiError(errs []error) error {
 	return multiErr
 }
 
-// NewMultiErrorUnchecked wraps multiple error.
-// Unlike NewMultiError, NewMultiErrorUnchecked returns non nil error
-// even if errs do not contains any non nil error.
+// NewMultiErrorUnchecked wraps errors into single error.
+// As suffix "unchecked" implies it does not do any filtering for errs.
+// The returned error is always non nil even if all errors are nil or len(errs) == 0.
 func NewMultiErrorUnchecked(errs []error) error {
 	return multiError(errs)
 }
@@ -86,12 +85,15 @@ func (me multiError) Unwrap() []error {
 }
 
 // Format implements fmt.Formatter.
-// Format propagates given format
+//
+// Format propagates given flags, width, precision and verb into each error.
+// Then it concatenates each result with ", " suffix.
+//
 // Without Format, me is less readable when printed through fmt.*printf family functions.
-// e.g. It prints
+// e.g. Format produces lines like
 // (%+v) MultiError: errors, exampleErr: Foo=foo Bar=bar Baz=baz
 // (%#v) MultiError: &errors.errorString{s:"errors"}, &mymodule.exampleErr{Foo:"foo", Bar:"bar", Baz:"baz"}
-// rather than (w/o Format)
+// instead of (w/o Format)
 // (%+v) stream.multiError{(*errors.errorString)(0xc00002c300), (*mymodule.exampleErr)(0xc000102630)}
 // (%#v) [824633901824 824634779184]
 func (me multiError) Format(state fmt.State, verb rune) {
