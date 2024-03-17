@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"io"
+	"sync/atomic"
 	"testing"
 )
 
@@ -36,6 +37,44 @@ func init() {
 	randomBytes32KiB = buf2.Bytes()
 }
 
+type readReaderAt interface {
+	io.Reader
+	io.ReaderAt
+}
+
+type closable[T readReaderAt] struct {
+	R      T
+	Closed atomic.Bool
+}
+
+func (c *closable[T]) ReadAt(p []byte, off int64) (int, error) {
+	return c.R.ReadAt(p, off)
+}
+
+func (c *closable[T]) Read(p []byte) (int, error) {
+	return c.R.Read(p)
+}
+
+func (c *closable[T]) Close() error {
+	c.Closed.Store(true)
+	return nil
+}
+
+func prepareSplittedReader(b []byte, lens []int) []*closable[*bytes.Reader] {
+	reader := bytes.NewReader(b)
+	var splitted []*closable[*bytes.Reader]
+	for i := 0; ; i++ {
+		buf := make([]byte, lens[i%len(lens)])
+		n, _ := io.ReadAtLeast(reader, buf, 1)
+		if n <= 0 {
+			break
+		}
+
+		splitted = append(splitted, &closable[*bytes.Reader]{R: bytes.NewReader(buf[:n])})
+	}
+	return splitted
+}
+
 // eofReaderAt basically identical to bytes.Reader
 // but it returns n, io.EOF if it has read until EOF.
 type eofReaderAt struct {
@@ -49,8 +88,7 @@ func (r *eofReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 	return n, err
 }
-
-func prepareReader(b []byte, lens []int, useEofReaderAt bool) []SizedReaderAt {
+func prepareSizedReader(b []byte, lens []int, useEofReaderAt bool) []SizedReaderAt {
 	reader := bytes.NewReader(b)
 	var sizedReaders []SizedReaderAt
 	for i := 0; ; i++ {
@@ -87,10 +125,26 @@ func useEofReaderAtTestCaseName(b bool) string {
 	return "use_bytesReader"
 }
 
+func TestMultiReadCloser(t *testing.T) {
+	readers := prepareSplittedReader(randomBytes, []int{1024})
+	r := NewMultiReadCloser(readers...)
+	for _, reader := range readers {
+		assertBool(t, !reader.Closed.Load(), "Closed is true")
+	}
+	bin, err := io.ReadAll(r)
+	assertErrorsIs(t, err, nil)
+	assertBool(t, bytes.Equal(randomBytes, bin), "bytes.Equal returned false")
+	err = r.Close()
+	assertErrorsIs(t, err, nil)
+	for _, reader := range readers {
+		assertBool(t, reader.Closed.Load(), "Closed is false")
+	}
+}
+
 func TestMultiReadAtSeekCloser_read_all(t *testing.T) {
 	for _, b := range []bool{false, true} {
 		t.Run(useEofReaderAtTestCaseName(b), func(t *testing.T) {
-			r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}, b))
+			r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, []int{1024}, b))
 			var out bytes.Buffer
 			buf := make([]byte, 1024)
 			// prevent efficient methods like ReadFrom from being used.
@@ -110,7 +164,7 @@ func TestMultiReadAtSeekCloser_read_all(t *testing.T) {
 func TestMultiReadAtSeekCloser_ReadAt_reads_all(t *testing.T) {
 	for _, b := range []bool{false, true} {
 		t.Run(useEofReaderAtTestCaseName(b), func(t *testing.T) {
-			r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}, b))
+			r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, []int{1024}, b))
 			buf := make([]byte, len(randomBytes))
 			n, err := r.ReadAt(buf, 0)
 			assertBool(
@@ -130,7 +184,7 @@ func TestMultiReadAtSeekCloser_ReadAt_reads_all(t *testing.T) {
 }
 
 func TestMultiReadAtSeekCloser_ReadAt_reads_over_upper_limit(t *testing.T) {
-	r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}, false))
+	r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, []int{1024}, false))
 	buf := make([]byte, len(randomBytes))
 	n, err := r.ReadAt(buf, 100)
 	assertErrorsIs(t, err, io.EOF)
@@ -164,7 +218,7 @@ func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
 		},
 	} {
 		t.Run("Read_"+tc.name, func(t *testing.T) {
-			reader := prepareReader(randomBytes, []int{1024}, false)
+			reader := prepareSizedReader(randomBytes, []int{1024}, false)
 
 			sized := reader[3]
 			sized.Size = sized.Size + int64(tc.diff)
@@ -178,7 +232,7 @@ func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
 			assertErrorsIs(t, err, tc.err)
 		})
 		t.Run("ReatAt_"+tc.name, func(t *testing.T) {
-			reader := prepareReader(randomBytes, []int{1024}, false)
+			reader := prepareSizedReader(randomBytes, []int{1024}, false)
 
 			sized := reader[3]
 			sized.Size = sized.Size + int64(tc.diff)

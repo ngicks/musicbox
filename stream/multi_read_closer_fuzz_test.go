@@ -29,7 +29,7 @@ func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
 			t.Skip()
 		}
 		t.Logf("seed: %d, %d, %d", len1, len2, len3)
-		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{len1, len2, len3}, false))
+		r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, []int{len1, len2, len3}, false))
 		dst, err := io.ReadAll(r)
 		assertNilInterface(t, err)
 		assertBool(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
@@ -50,7 +50,7 @@ func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 		locs := [...]int{loc1, loc2, loc3}
 
 		buf := make([]byte, 1024)
-		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens, false))
+		r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, lens, false))
 		for _, loc := range locs {
 			{
 				n, err := r.ReadAt(buf, int64(loc))
@@ -104,7 +104,7 @@ func FuzzMultiReadAtSeekCloser_Seek(f *testing.F) {
 					t.Logf("whence = SeekEnd")
 				}
 
-				mult := NewMultiReadAtSeekCloser(prepareReader(randomBytes, lens, false))
+				mult := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, lens, false))
 				org := bytes.NewReader(randomBytes)
 
 				buf1, buf2 := make([]byte, len1), make([]byte, len1)
@@ -125,7 +125,7 @@ func FuzzMultiReadAtSeekCloser_Seek(f *testing.F) {
 				_, orgErr = io.ReadFull(org, buf2)
 				assertBool(t, rErr == nil && orgErr == nil || rErr != nil && orgErr != nil, "left = %v, right = %v", rErr, orgErr)
 				if rErr == io.EOF {
-					assertEq(t, rErr, orgErr)
+					assertErrorsIs(t, rErr, orgErr)
 				}
 				if rErr == nil {
 					assertBool(t, bytes.Equal(buf1, buf2), "bytes.Equal returned false")
