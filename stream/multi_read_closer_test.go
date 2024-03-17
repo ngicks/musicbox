@@ -141,6 +141,30 @@ func TestMultiReadCloser(t *testing.T) {
 	}
 }
 
+func TestMultiReadAtSeekCloser_Close(t *testing.T) {
+	buf := make([]byte, 10*1024+22)
+	{
+		r := NewMultiReadAtSeekCloser(prepareSizedReader(randomBytes, []int{1024, 8994}, false))
+		_, _ = io.ReadFull(r, buf)
+		err := r.Close()
+		assertErrorsIs(t, err, nil)
+	}
+	{
+		sized := prepareSizedReader(randomBytes, []int{1024, 6789}, false)
+		for i, r := range sized {
+			r.R = &closable[*bytes.Reader]{R: r.R.(*bytes.Reader)}
+			sized[i] = r
+		}
+		r := NewMultiReadAtSeekCloser(sized)
+		_, _ = io.ReadFull(r, buf)
+		err := r.Close()
+		assertErrorsIs(t, err, nil)
+		for i, r := range sized {
+			assertBool(t, r.R.(*closable[*bytes.Reader]).Closed.Load(), "Closed returned index %d", i)
+		}
+	}
+}
+
 func TestMultiReadAtSeekCloser_read_all(t *testing.T) {
 	for _, b := range []bool{false, true} {
 		t.Run(useEofReaderAtTestCaseName(b), func(t *testing.T) {
