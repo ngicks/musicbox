@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"io"
 	"testing"
-
-	"gotest.tools/v3/assert"
 )
 
 var (
@@ -98,13 +96,13 @@ func TestMultiReadAtSeekCloser_read_all(t *testing.T) {
 			// prevent efficient methods like ReadFrom from being used.
 			// Force it to be on boundary.
 			_, err := io.CopyBuffer(onlyWrite{&out}, r, buf)
-			assert.NilError(t, err)
-			assert.Assert(t,
+			assertNilInterface(t, err)
+			assertBool(t,
 				len(randomBytes) == out.Len(),
 				"src len = %d, dst len = %d",
 				len(randomBytes), out.Len(),
 			)
-			assert.Assert(t, bytes.Equal(randomBytes, out.Bytes()))
+			assertBool(t, bytes.Equal(randomBytes, out.Bytes()), "bytes.Equal returned false")
 		})
 	}
 }
@@ -115,18 +113,18 @@ func TestMultiReadAtSeekCloser_ReadAt_reads_all(t *testing.T) {
 			r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}, b))
 			buf := make([]byte, len(randomBytes))
 			n, err := r.ReadAt(buf, 0)
-			assert.Assert(
+			assertBool(
 				t,
 				err == nil || err == io.EOF,
 				"err is not either of nil or io.EOF, but is %#v",
 				err,
 			)
-			assert.Assert(t,
+			assertBool(t,
 				len(randomBytes) == n,
 				"src len = %d, read = %d",
 				len(randomBytes), n,
 			)
-			assert.Assert(t, bytes.Equal(randomBytes, buf))
+			assertBool(t, bytes.Equal(randomBytes, buf), "bytes.Equal returned false")
 		})
 	}
 }
@@ -135,13 +133,13 @@ func TestMultiReadAtSeekCloser_ReadAt_reads_over_upper_limit(t *testing.T) {
 	r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{1024}, false))
 	buf := make([]byte, len(randomBytes))
 	n, err := r.ReadAt(buf, 100)
-	assert.ErrorIs(t, err, io.EOF)
-	assert.Assert(t,
+	assertErrorsIs(t, err, io.EOF)
+	assertBool(t,
 		len(randomBytes)-100 == n,
 		"src len = %d, read = %d",
 		len(randomBytes), n,
 	)
-	assert.Assert(t, bytes.Equal(randomBytes[100:], buf[:n]))
+	assertBool(t, bytes.Equal(randomBytes[100:], buf[:n]), "bytes.Equal returned false")
 }
 
 func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
@@ -176,8 +174,8 @@ func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
 			var out bytes.Buffer
 			buf := make([]byte, 1024)
 			_, err := io.CopyBuffer(&out, r, buf)
-			assert.ErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
-			assert.ErrorIs(t, err, tc.err)
+			assertErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
+			assertErrorsIs(t, err, tc.err)
 		})
 		t.Run("ReatAt_"+tc.name, func(t *testing.T) {
 			reader := prepareReader(randomBytes, []int{1024}, false)
@@ -190,8 +188,8 @@ func TestMultiReadAtSeekCloser_wrong_size(t *testing.T) {
 			buf := make([]byte, 1024)
 			n, err := r.ReadAt(buf, tc.readAtLoc)
 			t.Logf("ReadAt: %d", n)
-			assert.ErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
-			assert.ErrorIs(t, err, tc.err)
+			assertErrorContains(t, err, "MultiReadAtSeekCloser.Read:")
+			assertErrorsIs(t, err, tc.err)
 		})
 	}
 }

@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"testing"
-
-	"gotest.tools/v3/assert"
-	"gotest.tools/v3/assert/cmp"
 )
 
 func TestMultiError(t *testing.T) {
@@ -16,8 +13,8 @@ func TestMultiError(t *testing.T) {
 		{},
 		nil,
 	} {
-		assert.NilError(t, NewMultiError(errs))
-		assert.Assert(t, NewMultiErrorUnchecked(errs) != nil)
+		assertNilInterface(t, NewMultiError(errs))
+		assertBool(t, NewMultiErrorUnchecked(errs) != nil, "not NewMultiErrorUnchecked(errs) != nil")
 	}
 
 	type testCase struct {
@@ -41,12 +38,12 @@ func TestMultiError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := NewMultiErrorUnchecked(tc.input)
 			formatted := fmt.Sprintf("%s\n%v\n%+v\n%#v\n%d\n%T\n%9.3f", e, e, e, e, e, e, e)
-			assert.Assert(t, cmp.Equal(tc.expected, formatted))
+			assertEq(t, tc.expected, formatted)
 		})
 	}
 
 	nilMultiErr := NewMultiErrorUnchecked(nil)
-	assert.Assert(t, cmp.Equal("MultiError: ", nilMultiErr.Error()))
+	assertEq(t, "MultiError: ", nilMultiErr.Error())
 
 	mult := NewMultiErrorUnchecked([]error{
 		errors.New("foo"),
@@ -55,11 +52,11 @@ func TestMultiError(t *testing.T) {
 		errExample,
 	})
 
-	assert.ErrorIs(t, mult, fs.ErrClosed)
-	var e *exampleErr
-	assert.Assert(t, errors.As(mult, &e))
-	assert.ErrorIs(t, mult, errExample)
-	assert.Assert(t, !errors.Is(mult, errExampleUnknown))
+	assertErrorsIs(t, mult, fs.ErrClosed)
+
+	assertErrorsAs[*exampleErr](t, mult)
+	assertErrorsIs(t, mult, errExample)
+	assertNotErrorsIs(t, mult, errExampleUnknown)
 }
 
 var (

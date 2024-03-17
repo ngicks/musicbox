@@ -16,7 +16,7 @@ func BenchmarkMultiReadAtSeekCloser_ReadAt_lookup_worst(b *testing.B) {
 				buf := make([]byte, 128)
 				b.ResetTimer()
 
-				for range b.N {
+				for i := 0; i < b.N; i++ {
 					_, _ = r.ReadAt(buf, int64(len(randomBytes32KiB))-200)
 				}
 			})

@@ -5,9 +5,6 @@ import (
 	"encoding/hex"
 	"io"
 	"testing"
-
-	"gotest.tools/v3/assert"
-	"gotest.tools/v3/assert/cmp"
 )
 
 func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
@@ -19,9 +16,9 @@ func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
 		t.Logf("seed: %d, %d, %d", len1, len2, len3)
 		r := NewMultiReadAtSeekCloser(prepareReader(randomBytes, []int{len1, len2, len3}, false))
 		dst, err := io.ReadAll(r)
-		assert.NilError(t, err)
-		assert.Assert(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
-		assert.Assert(t, bytes.Equal(randomBytes, dst))
+		assertNilInterface(t, err)
+		assertBool(t, len(randomBytes) == len(dst), "src len = %d, dst len = %d", len(randomBytes), len(dst))
+		assertBool(t, bytes.Equal(randomBytes, dst), "bytes.Equal returned false")
 	})
 }
 
@@ -42,7 +39,7 @@ func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 		for _, loc := range locs {
 			{
 				n, err := r.ReadAt(buf, int64(loc))
-				assert.NilError(t, err)
+				assertNilInterface(t, err)
 				split := randomBytes[:]
 				if loc >= len(randomBytes) {
 					split = split[len(randomBytes):]
@@ -52,8 +49,8 @@ func FuzzMultiReadAtSeekCloser_ReadAt(f *testing.F) {
 				if len(split) >= 1024 {
 					split = split[:1024]
 				}
-				assert.Assert(t, n == len(split), "left = %d, right = %d", n, len(split))
-				assert.Assert(t, bytes.Equal(buf, split), "left = %s, right = %s", hex.EncodeToString(buf), hex.EncodeToString(split))
+				assertBool(t, n == len(split), "left = %d, right = %d", n, len(split))
+				assertBool(t, bytes.Equal(buf, split), "left = %s, right = %s", hex.EncodeToString(buf), hex.EncodeToString(split))
 			}
 		}
 	})
@@ -99,24 +96,24 @@ func FuzzMultiReadAtSeekCloser_Seek(f *testing.F) {
 
 				_, rErr := io.ReadFull(mult, buf1)
 				_, orgErr := io.ReadFull(org, buf1)
-				assert.Assert(t, rErr == nil && orgErr == nil || rErr != nil && orgErr != nil, "left = %v, right = %v", rErr, orgErr)
+				assertBool(t, rErr == nil && orgErr == nil || rErr != nil && orgErr != nil, "left = %v, right = %v", rErr, orgErr)
 
 				n, err := mult.Seek(off, whence)
 				bufN, bufErr := org.Seek(off, whence)
 				if err != nil {
-					assert.Assert(t, bufErr != nil)
+					assertNonNilInterface(t, bufErr)
 					continue
 				}
-				assert.Assert(t, cmp.Equal(n, bufN))
+				assertEq(t, n, bufN)
 
 				_, rErr = io.ReadFull(mult, buf1)
 				_, orgErr = io.ReadFull(org, buf2)
-				assert.Assert(t, rErr == nil && orgErr == nil || rErr != nil && orgErr != nil, "left = %v, right = %v", rErr, orgErr)
+				assertBool(t, rErr == nil && orgErr == nil || rErr != nil && orgErr != nil, "left = %v, right = %v", rErr, orgErr)
 				if rErr == io.EOF {
-					assert.Assert(t, cmp.Equal(rErr, orgErr))
+					assertEq(t, rErr, orgErr)
 				}
 				if rErr == nil {
-					assert.Assert(t, bytes.Equal(buf1, buf2))
+					assertBool(t, bytes.Equal(buf1, buf2), "bytes.Equal returned false")
 				}
 			}
 		}
