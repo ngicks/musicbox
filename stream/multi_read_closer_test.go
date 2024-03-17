@@ -9,7 +9,10 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-var randomBytes []byte
+var (
+	randomBytes      []byte
+	randomBytes32KiB []byte
+)
 
 func init() {
 	var buf bytes.Buffer
@@ -25,6 +28,14 @@ func init() {
 		panic(err)
 	}
 	randomBytes = buf.Bytes()
+
+	var buf2 bytes.Buffer
+	const bufSize2 = 32 * 1024
+	_, err = io.CopyN(&buf2, rand.Reader, bufSize2)
+	if err != nil {
+		panic(err)
+	}
+	randomBytes32KiB = buf2.Bytes()
 }
 
 // eofReaderAt basically identical to bytes.Reader
