@@ -35,6 +35,7 @@ func TestMultiError(t *testing.T) {
 				"MultiError: &{%!f(string=      err)}, &{%!f(string=      foo) %!f(string=      bar) %!f(string=      baz)}",
 		},
 	} {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			e := NewMultiErrorUnchecked(tc.input)
 			formatted := fmt.Sprintf("%s\n%v\n%+v\n%#v\n%d\n%T\n%9.3f", e, e, e, e, e, e, e)

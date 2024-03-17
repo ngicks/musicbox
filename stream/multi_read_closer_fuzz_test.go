@@ -2,10 +2,25 @@ package stream
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/hex"
 	"io"
 	"testing"
 )
+
+func min[T cmp.Ordered](t ...T) T {
+	var min T
+	if len(t) == 0 {
+		return min
+	}
+	min = t[0]
+	for _, tt := range t[0:] {
+		if tt < min {
+			min = tt
+		}
+	}
+	return min
+}
 
 func FuzzMultiReadAtSeekCloser_Read(f *testing.F) {
 	f.Add(6602, 23109, 7697586)
