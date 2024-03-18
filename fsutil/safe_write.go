@@ -19,6 +19,42 @@ import (
 	"github.com/spf13/afero"
 )
 
+type ordered interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 |
+		~float32 | ~float64 |
+		~uintptr |
+		~string
+}
+
+// func min[T ordered](t ...T) T {
+// 	var min T
+// 	if len(t) == 0 {
+// 		return min
+// 	}
+// 	min = t[0]
+// 	for _, tt := range t[0:] {
+// 		if tt < min {
+// 			min = tt
+// 		}
+// 	}
+// 	return min
+// }
+
+func max[T ordered](t ...T) T {
+	var max T
+	if len(t) == 0 {
+		return max
+	}
+	max = t[0]
+	for _, tt := range t[0:] {
+		if tt > max {
+			max = tt
+		}
+	}
+	return max
+}
+
 var (
 	bufPool = &sync.Pool{
 		New: func() any {

@@ -1,6 +1,6 @@
 module github.com/ngicks/musicbox/compose
 
-go 1.22.0
+go 1.20.0
 
 require (
 	github.com/compose-spec/compose-go/v2 v2.0.0-rc.7

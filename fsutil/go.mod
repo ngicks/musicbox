@@ -1,6 +1,6 @@
 module github.com/ngicks/musicbox/fsutil
 
-go 1.22.0
+go 1.20.0
 
 require (
 	github.com/ngicks/musicbox/stream v0.0.0-20240310233034-2cafc1fbba1d
