@@ -2,13 +2,16 @@ package stream
 
 import (
 	"bytes"
-	"cmp"
 	"encoding/hex"
 	"io"
 	"testing"
 )
 
-func min[T cmp.Ordered](t ...T) T {
+type ints interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64
+}
+
+func min[T ints](t ...T) T {
 	var min T
 	if len(t) == 0 {
 		return min
